@@ -1,0 +1,164 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: userId (uid)
+    // Fields: uid, displayName, email, role, photoURL, status
+    //
+    // Collection: projects
+    // Document ID: projectId
+    // Fields: id, name, description, managers, status, createdAt
+    //
+    // Collection: projects/{projectId}/tasks
+    // Document ID: taskId
+    // Fields: id, projectId, title, description, category, priority, status, progress, date, assignees, reviewers, cc, tags, attachedImages, subtasks, comments, createdAt
+    //
+    // Collection: notifications
+    // Document ID: notificationId
+    // Fields: id, targetUserId, message, taskId, read, time
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(path) ? get(path).data : null;
+    }
+
+    function isAdmin() {
+      let data = getUserData();
+      return isAuthenticated() && (
+        (data != null && data.role == 'admin') || 
+        (request.auth.token.email == "vietnb4@fpt.edu.vn" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isDirector() {
+      let data = getUserData();
+      return isAuthenticated() && data != null && data.role == 'director';
+    }
+
+    function isManager(projectId) {
+      let data = getUserData();
+      let project = get(/databases/$(database)/documents/projects/$(projectId)).data;
+      return isAuthenticated() && data != null && data.role == 'manager' && request.auth.uid in project.managers;
+    }
+
+    function isProjectManager(projectData) {
+      let data = getUserData();
+      return isAuthenticated() && data != null && data.role == 'manager' && request.auth.uid in projectData.managers;
+    }
+
+    function isTaskAssignee(taskData) {
+      return isAuthenticated() && request.auth.uid in taskData.assignees;
+    }
+
+    function isTaskReviewer(taskData) {
+      return isAuthenticated() && (request.auth.uid in taskData.get('reviewers', []));
+    }
+
+    function isTaskCC(taskData) {
+      return isAuthenticated() && request.auth.uid in taskData.cc;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function fieldUnchanged(field) {
+      return request.resource.data[field] == resource.data[field];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // User Profiles
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId && 
+                    (request.resource.data.role == 'user' || isAdmin());
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId && 
+                    hasOnlyAllowedFields(['displayName', 'photoURL', 'status', 'uid', 'email']) &&
+                    request.resource.data.role == resource.data.role);
+      allow delete: if isAdmin();
+    }
+
+    // Projects
+    match /projects/{projectId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isProjectManager(resource.data) && hasOnlyAllowedFields(['name', 'description', 'status']));
+      allow delete: if isAdmin();
+
+      // Tasks (Subcollection)
+      match /tasks/{taskId} {
+        allow read: if isAuthenticated();
+        
+        allow create: if isAdmin() || isManager(projectId) || (
+          isAuthenticated() && 
+          request.resource.data.status == 'pending' &&
+          request.resource.data.assignees == [request.auth.uid] &&
+          request.resource.data.progress == 0
+        );
+        
+        allow update: if isAdmin() || isDirector() || isManager(projectId) || (
+          isTaskAssignee(resource.data) && 
+          // Allow updating these fields
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['progress', 'subtasks', 'comments', 'attachedImages', 'status'])) &&
+          // User can only update status to 'todo', 'in-progress' or 'review' based on progress
+          (request.resource.data.status in ['todo', 'in-progress', 'review'])
+        ) || (
+          isTaskReviewer(resource.data) && 
+          // Reviewer can approve/reject and add comments
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'comments', 'progress'])) &&
+          (request.resource.data.status in ['todo', 'done', 'rejected', 'in-progress'])
+        );
+
+        allow delete: if isAdmin() || isManager(projectId);
+      }
+    }
+
+    // Tasks (Collection Group)
+    match /{path=**}/tasks/{taskId} {
+      allow read: if isAuthenticated();
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.targetUserId;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.targetUserId && hasOnlyAllowedFields(['read']);
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.targetUserId;
+    }
+
+    // Reviews
+    match /reviews/{reviewId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.userId);
+      allow delete: if isAdmin();
+    }
+
+    // Invitations
+    match /invitations/{invitationId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Connection Test
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

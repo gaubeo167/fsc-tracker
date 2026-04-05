@@ -1,0 +1,149 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "director", "manager", "user"] },
+        "photoURL": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "pending"] }
+      },
+      "required": ["uid", "displayName", "email", "role", "status"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Project information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "managers": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["active", "hidden"] },
+        "createdAt": { "type": "object" }
+      },
+      "required": ["id", "name", "description", "managers", "status", "createdAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Task information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "status": { "type": "string", "enum": ["pending", "todo", "in-progress", "review", "rejected", "done"] },
+        "progress": { "type": "number" },
+        "date": { "type": "string" },
+        "assignees": { "type": "array", "items": { "type": "string" } },
+        "reviewers": { "type": "array", "items": { "type": "string" } },
+        "cc": { "type": "array", "items": { "type": "string" } },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "attachedImages": { "type": "array", "items": { "type": "string" } },
+        "subtasks": { "type": "array", "items": { "$ref": "SubTask" } },
+        "comments": { "type": "array", "items": { "$ref": "Comment" } },
+        "createdAt": { "type": "object" }
+      },
+      "required": ["id", "projectId", "title", "description", "status", "progress", "date", "assignees", "reviewers", "createdAt"]
+    },
+    "SubTask": {
+      "title": "SubTask",
+      "description": "Sub-task information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "deadline": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "comment": { "type": "string" }
+      }
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Comment information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "text": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "time": { "type": "object" }
+      }
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "message": { "type": "string" },
+        "taskId": { "type": "string" },
+        "read": { "type": "boolean" },
+        "time": { "type": "object" }
+      },
+      "required": ["id", "targetUserId", "message", "read", "time"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Project review",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "userId": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "time": { "type": "object" }
+      },
+      "required": ["id", "projectId", "userId", "rating", "time"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "User invitation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "invitedBy": { "type": "string" },
+        "invitedAt": { "type": "object" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "email", "role", "invitedBy", "invitedAt", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles"
+    },
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "Projects"
+    },
+    "/projects/{projectId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Tasks within a project"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User notifications"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Project reviews"
+    },
+    "/invitations/{invitationId}": {
+      "schema": "Invitation",
+      "description": "User invitations"
+    }
+  }
+}
