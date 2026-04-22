@@ -205,14 +205,16 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         if (user) {
           // Domain check
-          const email = user.email || '';
+          const email = (user.email || '').toLowerCase().trim();
           const isInternal = email.endsWith('@fe.edu.vn') || email.endsWith('@fpt.edu.vn');
-          const isDev = email === 'viet88.nb@gmail.com';
+          const isDev = email === 'viet88.nb@gmail.com' || email === 'vietnb4@fpt.edu.vn';
           
+          console.log('AuthProvider: Email check:', { email, isInternal, isDev });
+
           if (!isInternal && !isDev) {
             console.warn('AuthProvider: Non-internal email detected:', email);
             await signOut(auth);
-            setError('Chỉ chấp nhận email nội bộ @fe.edu.vn hoặc @fpt.edu.vn. Vui lòng sử dụng tài khoản trường cấp.');
+            setError(`Email "${email}" không được phép. Chỉ chấp nhận email nội bộ @fe.edu.vn hoặc @fpt.edu.vn. Vui lòng sử dụng tài khoản trường cấp.`);
             setUser(null);
             setProfile(null);
             setLoading(false);
@@ -251,7 +253,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (err: any) {
         console.error('AuthProvider: Auth state change error:', err);
         setError(err.message || 'Lỗi xác thực');
-        handleFirestoreError(err, OperationType.GET, 'users');
+        // Don't throw here to avoid crashing the auth listener
       } finally {
         setLoading(false);
       }
@@ -267,6 +269,10 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('AuthProvider: Sign in error:', err);
       if (err.code === 'auth/network-request-failed') {
         setError('Lỗi mạng (auth/network-request-failed): Vui lòng kiểm tra kết nối hoặc đảm bảo bạn đã cho phép popup và cookie bên thứ ba trong trình duyệt.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError('Tên miền này chưa được cấp phép trong Firebase Console. Nếu bạn đã triển khai lên tên miền riêng, hãy thêm nó vào danh sách "Authorized domains" trong Firebase Auth.');
+      } else if (err.code === 'auth/popup-blocked') {
+        setError('Cửa sổ đăng nhập bị chặn. Vui lòng cho phép popup cho trang web này.');
       } else {
         setError(err.message || 'Lỗi đăng nhập');
       }
@@ -292,6 +298,15 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
               <p className="text-sm font-bold text-red-900">Lỗi hệ thống</p>
               <p className="text-xs text-red-700 mt-1">{error}</p>
               <div className="flex gap-4 mt-3">
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(error);
+                    showToast('Đã sao chép mã lỗi!');
+                  }}
+                  className="text-xs font-bold text-indigo-600 hover:underline"
+                >
+                  Sao chép lỗi
+                </button>
                 <button 
                   onClick={() => window.location.reload()}
                   className="text-xs font-bold text-red-900 hover:underline"
@@ -420,6 +435,27 @@ const TaskCard: React.FC<{
         progress,
         status: newStatus
       });
+
+      // Send notifications for status/progress change
+      if (newStatus !== task.status || progress !== task.progress) {
+        const targets = [...new Set([...(task.assignees || []), ...(task.reviewers || []), ...(task.cc || []), ...projectManagers])].filter(id => id !== profile?.uid);
+        for (const targetId of targets) {
+          let message = `Công việc "${task.title}" đã được cập nhật tiến độ: ${progress}%`;
+          if (newStatus === 'review' && task.status !== 'review') {
+            message = `Công việc "${task.title}" đã hoàn thành 100% và đang chờ bạn nghiệm thu`;
+          } else if (newStatus !== task.status) {
+            message = `Công việc "${task.title}" đã chuyển sang trạng thái: ${newStatus}`;
+          }
+
+          await addDoc(collection(db, 'notifications'), {
+            targetUserId: targetId,
+            message,
+            taskId: task.id,
+            read: false,
+            time: Timestamp.now()
+          });
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `projects/${task.projectId}/tasks/${task.id}`);
     }
@@ -446,6 +482,24 @@ const TaskCard: React.FC<{
     try {
       if (!task.projectId) throw new Error('Missing projectId');
       await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), { progress, status: newStatus });
+
+      // Send notifications for progress change
+      if (progress !== task.progress || newStatus !== task.status) {
+        const targets = [...new Set([...(task.assignees || []), ...(task.reviewers || []), ...(task.cc || []), ...projectManagers])].filter(id => id !== profile?.uid);
+        for (const targetId of targets) {
+          let message = `Công việc "${task.title}" đã được cập nhật tiến độ: ${progress}%`;
+          if (newStatus === 'review' && task.status !== 'review') {
+            message = `Công việc "${task.title}" đã đạt 100% và đang chờ bạn nghiệm thu`;
+          }
+          await addDoc(collection(db, 'notifications'), {
+            targetUserId: targetId,
+            message,
+            taskId: task.id,
+            read: false,
+            time: Timestamp.now()
+          });
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `projects/${task.projectId}/tasks/${task.id}`);
     }
@@ -903,17 +957,35 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     attachedImages: task.attachedImages || [],
     progress: task.progress || 0,
     status: task.status || 'todo',
+    startDate: task.startDate || format(new Date(), 'yyyy-MM-dd'),
+    estimatedDuration: task.estimatedDuration || 0,
+    estimatedDeadline: task.estimatedDeadline || format(new Date(), 'yyyy-MM-dd'),
     subtasks: task.subtasks || [],
     comments: task.comments || []
   });
   const [loading, setLoading] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [commentImage, setCommentImage] = useState<string | null>(null);
-  const [newSubtask, setNewSubtask] = useState({ text: '', deadline: task.date || format(new Date(), 'yyyy-MM-dd') });
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const [newSubtask, setNewSubtask] = useState({ text: '', deadline: (task.date && today > task.date) ? task.date : today });
   const [activeSubtaskComment, setActiveSubtaskComment] = useState<string | null>(null);
   const [subtaskCommentText, setSubtaskCommentText] = useState('');
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [showActionCommentModal, setShowActionCommentModal] = useState<{ status: TaskStatus; title: string; variant: "primary" | "danger" | "success" } | null>(null);
+  const [editingSubtask, setEditingSubtask] = useState<{ id: string; text: string; deadline: string } | null>(null);
+
+  useEffect(() => {
+    if (editedTask.startDate && editedTask.estimatedDuration > 0) {
+      const start = new Date(editedTask.startDate);
+      const end = addDays(start, editedTask.estimatedDuration);
+      const formattedEnd = format(end, 'yyyy-MM-dd');
+      setEditedTask(prev => ({ 
+        ...prev, 
+        estimatedDeadline: formattedEnd,
+        date: formattedEnd
+      }));
+    }
+  }, [editedTask.startDate, editedTask.estimatedDuration]);
 
   const isManager = (profile?.role === 'manager' || profile?.role === 'admin' || projectManagers.includes(profile?.uid || '')) && profile?.role !== 'director';
   const isAdmin = profile?.role === 'admin';
@@ -961,6 +1033,13 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
   };
 
   const handleSave = async () => {
+    // Validate that task deadline is not earlier than any subtask deadline
+    const invalidSubtask = editedTask.subtasks.find(s => s.deadline > editedTask.date);
+    if (invalidSubtask) {
+      showToast(`Hạn của task lớn không được sớm hơn hạn của công việc nhỏ: "${invalidSubtask.text}" (${format(new Date(invalidSubtask.deadline), 'dd/MM/yyyy')})`, 'error');
+      return;
+    }
+
     setLoading(true);
     try {
       const taskData = {
@@ -976,6 +1055,9 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         attachedImages: editedTask.attachedImages || [],
         progress: editedTask.progress || 0,
         status: editedTask.status || 'todo',
+        startDate: editedTask.startDate || '',
+        estimatedDuration: editedTask.estimatedDuration || 0,
+        estimatedDeadline: editedTask.estimatedDeadline || '',
         subtasks: (editedTask.subtasks || []).map(s => ({
           ...s,
           comments: (s.comments || []).map(c => {
@@ -1013,17 +1095,34 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         });
       }
 
-      // If status changed to review, notify reviewers and managers
-      if (editedTask.status === 'review' && task.status !== 'review') {
-        const reviewTargets = [...new Set([...(editedTask.reviewers || []), ...projectManagers])].filter(id => id !== profile?.uid);
-        for (const targetId of reviewTargets) {
-          await addDoc(collection(db, 'notifications'), {
-            targetUserId: targetId,
-            message: `Công việc "${task.title}" đang chờ bạn nghiệm thu`,
-            taskId: task.id,
-            read: false,
-            time: Timestamp.now()
-          });
+      // If status or progress changed, notify all involved users
+      if (editedTask.status !== task.status || editedTask.progress !== task.progress) {
+        const updateTargets = [...new Set([...(editedTask.assignees || []), ...(editedTask.reviewers || []), ...(editedTask.cc || []), ...projectManagers])].filter(id => id !== profile?.uid);
+        console.log('Sending update notifications to targets:', updateTargets);
+        for (const targetId of updateTargets) {
+          let message = `Công việc "${task.title}" đã được cập nhật tiến độ: ${editedTask.progress}%`;
+          if (editedTask.status === 'review' && task.status !== 'review') {
+            message = `Công việc "${task.title}" đang chờ bạn nghiệm thu (100%)`;
+          } else if (editedTask.status === 'done' && task.status !== 'done') {
+            message = `Công việc "${task.title}" đã được nghiệm thu hoàn thành`;
+          } else if (editedTask.status === 'rejected' && task.status !== 'rejected') {
+            message = `Công việc "${task.title}" đã bị từ chối`;
+          } else if (editedTask.status !== task.status) {
+            message = `Công việc "${task.title}" đã chuyển sang trạng thái: ${editedTask.status.toUpperCase()}`;
+          }
+
+          try {
+            await addDoc(collection(db, 'notifications'), {
+              targetUserId: targetId,
+              message,
+              taskId: task.id,
+              read: false,
+              time: Timestamp.now()
+            });
+            console.log('Update notification sent to:', targetId);
+          } catch (err) {
+            console.error('Failed to send update notification to:', targetId, err);
+          }
         }
       }
 
@@ -1067,6 +1166,13 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
 
   const addSubtask = async () => {
     if (!newSubtask.text.trim()) return;
+    
+    // Validate subtask deadline
+    if (newSubtask.deadline > editedTask.date) {
+      showToast(`Hạn hoàn thành của công việc nhỏ không được vượt quá hạn của task lớn (${format(new Date(editedTask.date), 'dd/MM/yyyy')})`, 'error');
+      return;
+    }
+
     const sub: SubTask = {
       id: Math.random().toString(36).substr(2, 9),
       text: newSubtask.text,
@@ -1089,6 +1195,41 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         subtasks: newSubtasks,
         progress
       });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `projects/${task.projectId}/tasks/${task.id}`);
+    }
+  };
+
+  const saveEditedSubtask = async () => {
+    if (!editingSubtask || !editingSubtask.text.trim()) return;
+
+    // Validate subtask deadline
+    if (editingSubtask.deadline > editedTask.date) {
+      showToast(`Hạn hoàn thành của công việc nhỏ không được vượt quá hạn của task lớn (${format(new Date(editedTask.date), 'dd/MM/yyyy')})`, 'error');
+      return;
+    }
+
+    const newSubtasks = editedTask.subtasks.map(s => 
+      s.id === editingSubtask.id ? { ...s, text: editingSubtask.text, deadline: editingSubtask.deadline } : s
+    );
+
+    setEditedTask({ ...editedTask, subtasks: newSubtasks });
+    setEditingSubtask(null);
+
+    try {
+      await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), { 
+        subtasks: newSubtasks.map(s => ({
+          ...s,
+          comments: (s.comments || []).map(c => {
+            const cleanComment: any = { ...c };
+            Object.keys(cleanComment).forEach(key => {
+              if (cleanComment[key] === undefined) delete cleanComment[key];
+            });
+            return cleanComment;
+          })
+        }))
+      });
+      showToast('Đã cập nhật đầu công việc!');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `projects/${task.projectId}/tasks/${task.id}`);
     }
@@ -1502,6 +1643,72 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                 </div>
               </section>
 
+              {/* Timeline Section */}
+              <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ngày bắt đầu (Dự kiến)</label>
+                  {isEditingMetadata ? (
+                    <input 
+                      type="date" 
+                      value={editedTask.startDate}
+                      onChange={(e) => setEditedTask({ ...editedTask, startDate: e.target.value })}
+                      className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2 text-slate-700 font-medium">
+                      <Calendar size={16} className="text-slate-400" />
+                      {editedTask.startDate ? format(new Date(editedTask.startDate), 'dd/MM/yyyy') : 'Chưa thiết lập'}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Thời gian dự kiến (Ngày)</label>
+                  {isEditingMetadata ? (
+                    <input 
+                      type="number" 
+                      value={editedTask.estimatedDuration}
+                      onChange={(e) => setEditedTask({ ...editedTask, estimatedDuration: Number(e.target.value) })}
+                      className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                      min="0"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2 text-slate-700 font-medium">
+                      <Clock size={16} className="text-slate-400" />
+                      {editedTask.estimatedDuration} Ngày
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Deadline dự kiến</label>
+                  <div className="flex items-center gap-2 text-slate-700 font-medium">
+                    <Calendar size={16} className="text-slate-400" />
+                    {editedTask.estimatedDeadline ? format(new Date(editedTask.estimatedDeadline), 'dd/MM/yyyy') : 'Chưa thiết lập'}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Hạn hoàn thành (Deadline)</label>
+                  {isEditingMetadata ? (
+                    <input 
+                      type="date" 
+                      value={editedTask.date}
+                      onChange={(e) => setEditedTask({ ...editedTask, date: e.target.value })}
+                      className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-indigo-600"
+                    />
+                  ) : (
+                    <div className={cn(
+                      "flex items-center gap-2 font-bold",
+                      isTaskOverdue(editedTask) ? "text-red-600" : "text-indigo-600"
+                    )}>
+                      <Calendar size={16} />
+                      {editedTask.date ? format(new Date(editedTask.date), 'dd/MM/yyyy') : 'Chưa thiết lập'}
+                    </div>
+                  )}
+                </div>
+              </section>
+
               {/* Description Section */}
               <section className="space-y-3">
                 <div className="flex justify-between items-center">
@@ -1578,40 +1785,80 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                 <div className="space-y-2">
                   {editedTask.subtasks.map(s => (
                     <div key={s.id} className="group bg-white border border-slate-100 p-3 rounded-xl hover:shadow-sm transition-all">
-                      <div className="flex items-center gap-3">
-                        <button 
-                          onClick={() => profile?.role !== 'director' && toggleSubtask(s.id)}
-                          className={cn(
-                            "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
-                            s.completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 hover:border-indigo-500",
-                            profile?.role === 'director' && "cursor-not-allowed opacity-70"
-                          )}
-                        >
-                          {s.completed && <Check size={12} />}
-                        </button>
-                        <span className={cn("text-sm flex-1", s.completed && "text-slate-400 line-through")}>{s.text}</span>
-                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={() => setActiveSubtaskComment(activeSubtaskComment === s.id ? null : s.id)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all relative"
-                          >
-                            <MessageSquare size={14} />
-                            {s.comments && s.comments.length > 0 && (
-                              <span className="absolute -top-1 -right-1 bg-indigo-500 text-white text-[8px] w-3.5 h-3.5 rounded-full flex items-center justify-center">
-                                {s.comments.length}
-                              </span>
-                            )}
-                          </button>
-                          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded uppercase">
-                            {format(new Date(s.deadline), 'dd/MM')}
-                          </span>
-                          {isEditingMetadata && (
-                            <button onClick={() => removeSubtask(s.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Trash2 size={14} />
-                            </button>
-                          )}
+                      {editingSubtask?.id === s.id ? (
+                        <div className="space-y-3">
+                          <input 
+                            type="text" 
+                            value={editingSubtask.text}
+                            onChange={(e) => setEditingSubtask({ ...editingSubtask, text: e.target.value })}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="Tên đầu việc..."
+                            autoFocus
+                          />
+                          <div className="flex items-center gap-2">
+                            <div className="relative flex-1">
+                              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                              <input 
+                                type="date" 
+                                value={editingSubtask.deadline}
+                                max={editedTask.date}
+                                onChange={(e) => setEditingSubtask({ ...editingSubtask, deadline: e.target.value })}
+                                className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
+                            </div>
+                            <Button size="sm" variant="ghost" onClick={() => setEditingSubtask(null)}>Hủy</Button>
+                            <Button size="sm" onClick={saveEditedSubtask}>Lưu</Button>
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <button 
+                            onClick={() => profile?.role !== 'director' && toggleSubtask(s.id)}
+                            className={cn(
+                              "w-5 h-5 rounded-md border flex items-center justify-center transition-colors",
+                              s.completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 hover:border-indigo-500",
+                              profile?.role === 'director' && "cursor-not-allowed opacity-70"
+                            )}
+                          >
+                            {s.completed && <Check size={12} />}
+                          </button>
+                          <span className={cn("text-sm flex-1", s.completed && "text-slate-400 line-through")}>{s.text}</span>
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={() => setActiveSubtaskComment(activeSubtaskComment === s.id ? null : s.id)}
+                              className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all relative"
+                            >
+                              <MessageSquare size={14} />
+                              {s.comments && s.comments.length > 0 && (
+                                <span className="absolute -top-1 -right-1 bg-indigo-500 text-white text-[8px] w-3.5 h-3.5 rounded-full flex items-center justify-center">
+                                  {s.comments.length}
+                                </span>
+                              )}
+                            </button>
+                            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded uppercase">
+                              {format(new Date(s.deadline), 'dd/MM')}
+                            </span>
+                            {isEditingMetadata && (
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                  onClick={() => setEditingSubtask({ id: s.id, text: s.text, deadline: s.deadline })} 
+                                  className="p-1 text-slate-300 hover:text-indigo-600"
+                                  title="Chỉnh sửa"
+                                >
+                                  <Edit2 size={14} />
+                                </button>
+                                <button 
+                                  onClick={() => removeSubtask(s.id)} 
+                                  className="p-1 text-slate-300 hover:text-red-500"
+                                  title="Xóa"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                       
                       {/* Sub-task Comments Section */}
                       {activeSubtaskComment === s.id && (
@@ -1661,6 +1908,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                           type="date" 
                           className="px-4 py-2 rounded-lg border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                           value={newSubtask.deadline}
+                          max={editedTask.date}
                           onChange={(e) => setNewSubtask({ ...newSubtask, deadline: e.target.value })}
                         />
                         <Button onClick={addSubtask} size="sm" className="px-4"><Plus size={18} /></Button>
@@ -1736,6 +1984,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                       <input 
                         type="date" 
                         value={editedTask.date}
+                        min={new Date().toISOString().split('T')[0]}
                         onChange={(e) => setEditedTask({ ...editedTask, date: e.target.value })}
                         className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
                       />
@@ -1940,7 +2189,7 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [newProject, setNewProject] = useState({ name: '', description: '', managers: [] as string[] });
+  const [newProject, setNewProject] = useState({ name: '', description: '', managers: [] as string[], members: [] as string[] });
   const [showHidden, setShowHidden] = useState(false);
   const [activeExtraView, setActiveExtraView] = useState<'priority' | 'deadline' | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2005,7 +2254,11 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
 
   const filteredProjects = projects.filter(p => {
     if (profile?.role === 'admin' || profile?.role === 'director') return showHidden ? true : p.status === 'active';
-    if (profile?.role === 'manager') return p.managers.includes(profile.uid) && (showHidden ? true : p.status === 'active');
+    
+    const isManager = p.managers.includes(profile?.uid || '');
+    const isMember = (p.members || []).includes(profile?.uid || '');
+    
+    if (isManager || isMember) return showHidden ? true : p.status === 'active';
     
     // For regular users, only show projects where they have tasks
     const hasTasksInProject = allTasks.some(t => 
@@ -2068,102 +2321,6 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
       ? deadlineTasks 
       : allTasks.slice(0, 10);
 
-  const seedData = async () => {
-    if (!profile || profile.role !== 'admin') return;
-    try {
-      setLoading(true);
-      // 1. Create a sample project
-      const projectRef = await addDoc(collection(db, 'projects'), {
-        name: 'Dự án Mẫu FSC FPT',
-        description: 'Dự án mẫu để kiểm tra các tính năng của hệ thống FSC Tracker.',
-        managers: [profile.uid],
-        status: 'active',
-        createdAt: Timestamp.now()
-      });
-
-      // 2. Create tasks with different priorities and deadlines
-      const tasks = [
-        { 
-          title: 'Thiết kế giao diện Dashboard', 
-          description: 'Hoàn thiện UI/UX cho màn hình tổng quan.', 
-          priority: 'high', 
-          date: format(addDays(new Date(), 2), 'yyyy-MM-dd'),
-          status: 'in-progress',
-          progress: 45,
-          assignees: [profile.uid],
-          subtasks: [
-            { id: '1', text: 'Wireframe', deadline: format(addDays(new Date(), 1), 'yyyy-MM-dd'), completed: true, comments: [] }, 
-            { id: '2', text: 'Mockup', deadline: format(addDays(new Date(), 2), 'yyyy-MM-dd'), completed: false, comments: [] }
-          ],
-          comments: [],
-          attachedImages: [],
-          createdAt: Timestamp.now()
-        },
-        { 
-          title: 'Fix lỗi bảo mật hệ thống', 
-          description: 'Kiểm tra và vá các lỗ hổng bảo mật nghiêm trọng.', 
-          priority: 'critical', 
-          date: format(addDays(new Date(), 1), 'yyyy-MM-dd'),
-          status: 'todo',
-          progress: 0,
-          assignees: [profile.uid],
-          subtasks: [],
-          comments: [],
-          attachedImages: [],
-          createdAt: Timestamp.now()
-        },
-        { 
-          title: 'Viết tài liệu hướng dẫn sử dụng', 
-          description: 'Tài liệu cho người dùng cuối và quản trị viên.', 
-          priority: 'low', 
-          date: format(addDays(new Date(), 10), 'yyyy-MM-dd'),
-          status: 'pending',
-          progress: 10,
-          assignees: [profile.uid],
-          subtasks: [],
-          comments: [],
-          attachedImages: [],
-          createdAt: Timestamp.now()
-        },
-        { 
-          title: 'Kiểm thử hiệu năng (Load test)', 
-          description: 'Đảm bảo hệ thống chịu được 1000 users đồng thời.', 
-          priority: 'medium', 
-          date: format(addDays(new Date(), 5), 'yyyy-MM-dd'),
-          status: 'todo',
-          progress: 0,
-          assignees: [profile.uid],
-          subtasks: [],
-          comments: [],
-          attachedImages: [],
-          createdAt: Timestamp.now()
-        },
-        { 
-          title: 'Họp nghiệm thu giai đoạn 1', 
-          description: 'Báo cáo tiến độ và demo các tính năng đã hoàn thành.', 
-          priority: 'critical', 
-          date: format(new Date(), 'yyyy-MM-dd'),
-          status: 'review',
-          progress: 90,
-          assignees: [profile.uid],
-          subtasks: [],
-          comments: [],
-          attachedImages: [],
-          createdAt: Timestamp.now()
-        }
-      ];
-
-      for (const task of tasks) {
-        await addDoc(collection(db, `projects/${projectRef.id}/tasks`), task);
-      }
-
-      showToast('Đã tạo dữ liệu mẫu thành công!');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'seed-data');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const createProject = async () => {
     if (!newProject.name || !profile || profile.role !== 'admin') return;
@@ -2172,10 +2329,11 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
         name: newProject.name,
         description: newProject.description || 'Dự án FSC FPT School',
         managers: newProject.managers.length > 0 ? newProject.managers : [profile.uid],
+        members: newProject.members || [],
         status: 'active',
         createdAt: Timestamp.now()
       });
-      setNewProject({ name: '', description: '', managers: [] });
+      setNewProject({ name: '', description: '', managers: [], members: [] });
       setIsNewProjectModalOpen(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'projects');
@@ -2189,6 +2347,7 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
         name: editingProject.name,
         description: editingProject.description,
         managers: editingProject.managers || [],
+        members: editingProject.members || [],
         status: editingProject.status
       });
       setEditingProject(null);
@@ -2211,11 +2370,6 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
           <p className="text-slate-500">Chào mừng, {profile?.displayName}. Đây là báo cáo tổng thể dự án FSC.</p>
         </div>
         <div className="flex gap-3">
-          {profile?.role === 'admin' && (
-            <Button variant="outline" onClick={seedData} className="border-indigo-200 text-indigo-600 hover:bg-indigo-50">
-              <Star size={14} className="mr-2" /> Tạo dữ liệu mẫu
-            </Button>
-          )}
           {(profile?.role === 'admin' || profile?.role === 'director') && (
             <Button variant="secondary" onClick={() => setShowHidden(!showHidden)}>
               {showHidden ? 'Ẩn dự án đóng' : 'Hiện dự án đóng'}
@@ -2312,6 +2466,22 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
                     onUpdateStatus={async (t, s, c) => {
                       try {
                         await updateDoc(doc(db, `projects/${t.projectId}/tasks`, t.id), { status: s });
+                        
+                        // Send notifications for status change
+                        const targets = [...new Set([...(t.assignees || []), ...(t.reviewers || []), ...(t.cc || []), ...(projects.find(p => p.id === t.projectId)?.managers || [])])].filter(id => id !== profile?.uid);
+                        for (const targetId of targets) {
+                          let message = `Công việc "${t.title}" đã chuyển sang trạng thái: ${s}`;
+                          if (s === 'review') message = `Công việc "${t.title}" đang chờ bạn nghiệm thu`;
+                          if (s === 'done') message = `Công việc "${t.title}" đã hoàn thành`;
+                          
+                          await addDoc(collection(db, 'notifications'), {
+                            targetUserId: targetId,
+                            message,
+                            taskId: t.id,
+                            read: false,
+                            time: Timestamp.now()
+                          });
+                        }
                       } catch (error) {
                         handleFirestoreError(error, OperationType.UPDATE, `projects/${t.projectId}/tasks/${t.id}`);
                       }
@@ -2621,7 +2791,7 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Gán Manager</label>
                   <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1">
-                    {users.filter(u => u.role === 'manager' || u.role === 'admin').map(u => (
+                    {users.filter(u => u.role === 'manager' || u.role === 'admin' || u.role === 'director').map(u => (
                       <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-slate-50 rounded cursor-pointer">
                         <input 
                           type="checkbox" 
@@ -2631,6 +2801,27 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
                               setNewProject({ ...newProject, managers: [...newProject.managers, u.uid] });
                             } else {
                               setNewProject({ ...newProject, managers: newProject.managers.filter(id => id !== u.uid) });
+                            }
+                          }}
+                        />
+                        <span>{u.displayName} ({u.role})</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Thành viên dự án</label>
+                  <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1">
+                    {users.map(u => (
+                      <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-slate-50 rounded cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={newProject.members.includes(u.uid)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setNewProject({ ...newProject, members: [...newProject.members, u.uid] });
+                            } else {
+                              setNewProject({ ...newProject, members: newProject.members.filter(id => id !== u.uid) });
                             }
                           }}
                         />
@@ -2692,7 +2883,7 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Quản lý bởi</label>
                   <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1">
-                    {users.filter(u => u.role === 'manager' || u.role === 'admin').map(u => (
+                    {users.filter(u => u.role === 'manager' || u.role === 'admin' || u.role === 'director').map(u => (
                       <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-slate-50 rounded cursor-pointer">
                         <input 
                           type="checkbox" 
@@ -2703,6 +2894,28 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
                               setEditingProject({ ...editingProject, managers: [...currentManagers, u.uid] });
                             } else {
                               setEditingProject({ ...editingProject, managers: currentManagers.filter(id => id !== u.uid) });
+                            }
+                          }}
+                        />
+                        <span>{u.displayName} ({u.role})</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Thành viên dự án</label>
+                  <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1">
+                    {users.map(u => (
+                      <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-slate-50 rounded cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={(editingProject.members || []).includes(u.uid)}
+                          onChange={(e) => {
+                            const currentMembers = editingProject.members || [];
+                            if (e.target.checked) {
+                              setEditingProject({ ...editingProject, members: [...currentMembers, u.uid] });
+                            } else {
+                              setEditingProject({ ...editingProject, members: currentMembers.filter(id => id !== u.uid) });
                             }
                           }}
                         />
@@ -2847,7 +3060,8 @@ const MyTasksView = () => {
         await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), updates);
         
         // Send notifications for status change
-        const targets = [...new Set([...task.assignees, ...(task.reviewers || []), ...(task.cc || [])])].filter(id => id !== profile?.uid);
+        const projectManagers = projects.find(p => p.id === task.projectId)?.managers || [];
+        const targets = [...new Set([...task.assignees, ...(task.reviewers || []), ...(task.cc || []), ...projectManagers])].filter(id => id !== profile?.uid);
         for (const targetId of targets) {
           let message = '';
           if (newStatus === 'rejected') {
@@ -3345,6 +3559,9 @@ const TaskCreateModal = ({
     cc: [] as string[],
     priority: 'medium' as Priority, 
     date: format(new Date(), 'yyyy-MM-dd'),
+    startDate: format(new Date(), 'yyyy-MM-dd'),
+    estimatedDuration: 0,
+    estimatedDeadline: format(new Date(), 'yyyy-MM-dd'),
     attachedImages: [] as string[]
   });
 
@@ -3381,6 +3598,19 @@ const TaskCreateModal = ({
     }
   }, [projectId, initialProjectId]);
 
+  useEffect(() => {
+    if (newTask.startDate && newTask.estimatedDuration > 0) {
+      const start = new Date(newTask.startDate);
+      const end = addDays(start, newTask.estimatedDuration);
+      const formattedEnd = format(end, 'yyyy-MM-dd');
+      setNewTask(prev => ({ 
+        ...prev, 
+        estimatedDeadline: formattedEnd,
+        date: formattedEnd
+      }));
+    }
+  }, [newTask.startDate, newTask.estimatedDuration]);
+
   const addTask = async () => {
     if (!newTask.title || !profile || !projectId || newTask.reviewers.length === 0) {
       showToast('Vui lòng nhập đầy đủ thông tin (bao gồm người phê duyệt)', 'error');
@@ -3399,6 +3629,9 @@ const TaskCreateModal = ({
         priority: newTask.priority,
         progress: 0,
         date: newTask.date,
+        startDate: newTask.startDate,
+        estimatedDuration: newTask.estimatedDuration,
+        estimatedDeadline: newTask.estimatedDeadline,
         assignees: assignees,
         reviewers: newTask.reviewers,
         cc: newTask.cc,
@@ -3411,15 +3644,22 @@ const TaskCreateModal = ({
       const taskRef = await addDoc(collection(db, `projects/${projectId}/tasks`), taskData);
 
       // Send notifications to all involved users
-      const targets = [...new Set([...assignees, ...newTask.reviewers, ...newTask.cc])].filter(id => id !== profile.uid);
+      const projectManagers = projects.find(p => p.id === projectId)?.managers || [];
+      const targets = [...new Set([...assignees, ...newTask.reviewers, ...newTask.cc, ...projectManagers])].filter(id => id !== profile.uid);
+      console.log('Sending notifications to targets:', targets);
       for (const targetId of targets) {
-        await addDoc(collection(db, 'notifications'), {
-          targetUserId: targetId,
-          message: `Bạn được gán/liên quan đến công việc mới: "${newTask.title}"`,
-          taskId: taskRef.id,
-          read: false,
-          time: Timestamp.now()
-        });
+        try {
+          await addDoc(collection(db, 'notifications'), {
+            targetUserId: targetId,
+            message: `Bạn được gán/liên quan đến công việc mới: "${newTask.title}"`,
+            taskId: taskRef.id,
+            read: false,
+            time: Timestamp.now()
+          });
+          console.log('Notification sent to:', targetId);
+        } catch (err) {
+          console.error('Failed to send notification to:', targetId, err);
+        }
       }
 
       showToast('Đã tạo công việc mới, đang chờ phê duyệt!');
@@ -3479,6 +3719,58 @@ const TaskCreateModal = ({
                 className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none h-24"
                 placeholder="Mô tả chi tiết công việc..."
               />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Ngày bắt đầu (Dự kiến)</label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input 
+                    type="date" 
+                    value={newTask.startDate}
+                    onChange={(e) => setNewTask({ ...newTask, startDate: e.target.value })}
+                    className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Thời gian (Ngày)</label>
+                <input 
+                  type="number" 
+                  value={newTask.estimatedDuration}
+                  onChange={(e) => setNewTask({ ...newTask, estimatedDuration: Number(e.target.value) })}
+                  className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  min="0"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Deadline (Dự kiến)</label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input 
+                    type="date" 
+                    value={newTask.estimatedDeadline}
+                    readOnly
+                    className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 bg-slate-50 outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Hạn hoàn thành (Deadline)</label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input 
+                    type="date" 
+                    value={newTask.date}
+                    onChange={(e) => setNewTask({ ...newTask, date: e.target.value })}
+                    className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-indigo-600"
+                  />
+                </div>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
@@ -3632,7 +3924,7 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [viewMode, setViewMode] = useState<'list' | 'board'>('list');
-  const [activeTab, setActiveTab] = useState<TaskStatus | 'all' | 'reports' | 'reviews'>('all');
+  const [activeTab, setActiveTab] = useState<TaskStatus | 'all' | 'reports' | 'reviews' | 'waiting'>('all');
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [isNewReviewModalOpen, setIsNewReviewModalOpen] = useState(false);
   const [newReview, setNewReview] = useState({ rating: 5, comment: '' });
@@ -3738,7 +4030,7 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
       await updateDoc(doc(db, `projects/${projectId}/tasks`, task.id), updates);
       
       // Send notifications for status change
-      const targets = [...new Set([...task.assignees, ...(task.reviewers || []), ...(task.cc || [])])].filter(id => id !== profile?.uid);
+      const targets = [...new Set([...task.assignees, ...(task.reviewers || []), ...(task.cc || []), ...(project?.managers || [])])].filter(id => id !== profile?.uid);
       for (const targetId of targets) {
         let message = '';
         if (newStatus === 'rejected') {
@@ -3787,7 +4079,20 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
     }
   };
 
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const waitingTasksCount = tasks.filter(t => t.startDate && t.startDate > today && t.status !== 'done' && t.status !== 'rejected').length;
+
   const filteredTasks = tasks.filter(t => {
+    // Waiting list logic
+    const isWaiting = t.startDate && t.startDate > today && t.status !== 'done' && t.status !== 'rejected';
+    
+    if (activeTab === 'waiting') {
+      return isWaiting;
+    }
+    
+    // Hide waiting tasks from other status tabs to avoid confusion
+    if (isWaiting && activeTab !== 'all' && activeTab !== 'reports' && activeTab !== 'reviews') return false;
+
     if (activeTab !== 'all' && activeTab !== 'reports' && activeTab !== 'reviews') {
       if (activeTab === 'overdue') {
         if (!isTaskOverdue(t)) return false;
@@ -3893,16 +4198,17 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
-          {(['all', 'pending', 'todo', 'in-progress', 'overdue', 'review', 'rejected', 'done', 'reports', 'reviews'] as const).map((tab) => (
+          {(['all', 'waiting', 'pending', 'todo', 'in-progress', 'overdue', 'review', 'rejected', 'done', 'reports', 'reviews'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={cn(
-                "px-4 py-2 rounded-lg text-xs font-medium transition-all capitalize whitespace-nowrap",
+                "px-4 py-2 rounded-lg text-xs font-medium transition-all capitalize whitespace-nowrap flex items-center gap-2",
                 activeTab === tab ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
               )}
             >
               {tab === 'all' ? 'Tất cả' : 
+               tab === 'waiting' ? 'Danh sách chờ' :
                tab === 'pending' ? 'Chờ duyệt' :
                tab === 'todo' ? 'Sẵn sàng' :
                tab === 'in-progress' ? 'Đang làm' :
@@ -3912,7 +4218,15 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
                tab === 'done' ? 'Hoàn thành' :
                tab === 'reports' ? 'Báo cáo' : 'Đánh giá'}
               {tab !== 'reports' && tab !== 'reviews' && (
-                <span className="ml-2 opacity-50">({tasks.filter(t => tab === 'all' ? true : (tab === 'overdue' ? isTaskOverdue(t) : t.status === tab)).length})</span>
+                <span className={cn(
+                  "opacity-50 text-[10px]",
+                  tab === 'waiting' && waitingTasksCount > 0 ? "bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full opacity-100" : ""
+                )}>
+                  ({tab === 'all' ? tasks.length : 
+                    tab === 'waiting' ? waitingTasksCount :
+                    tab === 'overdue' ? tasks.filter(t => isTaskOverdue(t)).length : 
+                    tasks.filter(t => t.status === tab).length})
+                </span>
               )}
             </button>
           ))}
@@ -4265,6 +4579,7 @@ function AuthConsumer({
   setActiveNav: (nav: string) => void;
 }) {
   const { user, profile, loading, error, signIn, logout } = useAuth();
+  const { showToast } = useToast();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -4311,6 +4626,15 @@ function AuthConsumer({
               <AlertCircle size={14} /> Lỗi hệ thống:
             </p>
             <p className="break-words font-mono">{error}</p>
+            <button 
+              onClick={() => {
+                navigator.clipboard.writeText(error);
+                showToast('Đã sao chép mã lỗi!');
+              }}
+              className="text-[10px] font-bold text-indigo-600 hover:underline mt-1"
+            >
+              Sao chép mã lỗi
+            </button>
             {error.toLowerCase().includes('network-request-failed') && (
               <div className="mt-2 text-[10px] text-red-500 italic space-y-1">
                 <p>* Gợi ý: Kiểm tra kết nối mạng, tắt các trình chặn quảng cáo (AdBlock) hoặc thử lại sau vài phút.</p>

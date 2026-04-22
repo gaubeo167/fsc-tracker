@@ -19,6 +19,7 @@ export interface Project {
   name: string;
   description: string;
   managers: string[]; // userIds
+  members: string[]; // userIds
   status: ProjectStatus;
   createdAt: Timestamp;
 }
@@ -49,6 +50,9 @@ export interface Task {
   status: TaskStatus;
   progress: number;
   date: string; // Deadline
+  startDate?: string;
+  estimatedDuration?: number; // In days
+  estimatedDeadline?: string;
   assignees: string[]; // userIds
   reviewers: string[]; // userIds
   cc: string[]; // userIds
