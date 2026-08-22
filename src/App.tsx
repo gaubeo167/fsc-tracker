@@ -90,7 +90,7 @@ import {
   Legend
 } from 'recharts';
 import { format, addDays } from 'date-fns';
-import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
+import { auth, db, googleProvider, handleFirestoreError, setFirestoreErrorReporter, OperationType } from './firebase';
 import { Project, Task, SubTask, Review, UserProfile, ProjectStatus, TaskStatus, UserRole, TaskComment, Priority, Invitation } from './types';
 
 // Primitive dùng chung với src/modules/*. Trước đây cn/Card/Button/Badge được
@@ -187,6 +187,22 @@ const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  // Nối tầng dữ liệu vào tầng hiện thông báo.
+  //
+  // handleFirestoreError nằm ở firebase.ts (tầng dưới cùng, không biết gì về
+  // React) nên nó không tự hiện toast được. Trước đây nó chỉ console.error, và
+  // mọi lượt GHI hỏng đều im lặng tuyệt đối: bấm "Nghiệm thu" xong màn hình
+  // không đổi gì, người dùng tưởng nút hỏng.
+  //
+  // 6 giây chứ không phải 3: thông báo lỗi có mã lỗi cần đọc và chụp lại.
+  useEffect(() => {
+    setFirestoreErrorReporter((message) => {
+      setToast({ message, type: 'error' });
+      setTimeout(() => setToast(null), 6000);
+    });
+    return () => setFirestoreErrorReporter(null);
+  }, []);
 
   return (
     <ToastContext.Provider value={{ showToast }}>

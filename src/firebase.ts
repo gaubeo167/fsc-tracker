@@ -88,6 +88,23 @@ export enum OperationType {
   DELETE = "DELETE",
 }
 
+/**
+ * Nơi nhận thông báo lỗi để HIỆN RA cho người dùng.
+ *
+ * handleFirestoreError trước đây chỉ console.error. Hậu quả gặp thật: admin bấm
+ * "Nghiệm thu" một công việc, lượt ghi hỏng, và màn hình không đổi gì cả — không
+ * toast, không dòng chữ nào. Người dùng bấm lại vài lần rồi kết luận nút hỏng,
+ * còn người sửa thì không có gì để lần theo.
+ *
+ * Không nhập trực tiếp ToastProvider vào đây: firebase.ts là tầng dưới cùng,
+ * kéo React vào là vòng phụ thuộc. App.tsx đăng ký hàm hiện toast lúc khởi động.
+ */
+type BaoLoi = (message: string) => void;
+let baoLoi: BaoLoi | null = null;
+export function setFirestoreErrorReporter(fn: BaoLoi | null) {
+  baoLoi = fn;
+}
+
 // ⚠️ Error handler chuẩn hoá
 export const handleFirestoreError = (
   error: any,
@@ -104,6 +121,22 @@ export const handleFirestoreError = (
     console.error(
       `[Firestore ${type}] PERMISSION_DENIED tại "${path}" — rules đang chặn, ` +
         `KHÔNG phải không có dữ liệu. Kiểm tra firestore.rules và database đang dùng (${DATABASE_ID}).`
+    );
+  }
+
+  // Nói cho người dùng biết, bằng tiếng Việt và kèm mã lỗi để ảnh chụp màn hình
+  // đủ dùng làm báo lỗi. Lượt ĐỌC hỏng thì im lặng — danh sách rỗng đã có
+  // StateBlock lo; chỉ lượt GHI mới cần hét lên, vì người dùng vừa bấm một nút
+  // và đang chờ chuyện gì đó xảy ra.
+  const laLuotGhi =
+    type === OperationType.CREATE ||
+    type === OperationType.UPDATE ||
+    type === OperationType.DELETE;
+  if (laLuotGhi && baoLoi) {
+    baoLoi(
+      isPermissionDenied
+        ? `Bạn không có quyền thực hiện thao tác này (${path}).`
+        : `Không lưu được: ${error?.message || error?.code || "lỗi không rõ"}`
     );
   }
 
