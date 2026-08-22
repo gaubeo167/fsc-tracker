@@ -1,0 +1,113 @@
+{
+  "//": [
+    "Composite index cho module hỗ trợ.",
+    "",
+    "Phải khai TRƯỚC khi chạy thật: emulator KHÔNG kiểm tra sự tồn tại của",
+    "composite index, nên mọi truy vấn repository sẽ pass ở local rồi fail trên",
+    "production với FAILED_PRECONDITION. Cách duy nhất để chắc là chạy từng truy",
+    "vấn trên project thật sau khi deploy."
+  ],
+  "indexes": [
+    {
+      "//": "ticketRepository.fetchTicketsForCampus — vế ticket của chính trường",
+      "collectionGroup": "support_tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campusId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "//": "fetchTicketsForCampus — vế ticket SYSTEM_WIDE có ảnh hưởng trường mình",
+      "collectionGroup": "support_tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "scope",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "affectedCampusIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "//": "fetchTriageQueue — hàng đợi của một phân hệ",
+      "collectionGroup": "support_tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "moduleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "//": "Job SLA: quét ticket quá hạn. sla_running lọc sẵn trạng thái tạm dừng bằng mệnh đề BẰNG, vì kết hợp not-in với range trên trường khác là không dùng index được",
+      "collectionGroup": "support_tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "slaRunning",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "//": "findDuplicateCandidates trên bản gương mỏng",
+      "collectionGroup": "support_ticket_index",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "moduleId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "titleTokens",
+          "arrayConfig": "CONTAINS"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "//": "Firestore tự index MỌI trường khi ghi. description và logExcerpt là văn bản dài, không bao giờ dùng để truy vấn — index chúng chỉ tốn phí ghi và dung lượng.",
+      "collectionGroup": "support_tickets",
+      "fieldPath": "description",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "support_tickets",
+      "fieldPath": "logExcerpt",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "support_tickets",
+      "fieldPath": "stepsToReproduce",
+      "indexes": []
+    }
+  ]
+}

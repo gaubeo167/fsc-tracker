@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Config RIÊNG cho emulator local. Đừng dùng để deploy.",
+    "",
+    "Vì sao phải tách khỏi firebase.json: firebase.json dùng dạng MẢNG cho khoá",
+    "'firestore' để deploy rules được sang cả hai database ((default) và fsc-asia)",
+    "— lệnh deploy không có cờ --database nên đây là cách duy nhất. Nhưng emulator",
+    "KHÔNG đọc được dạng mảng, nó lặng lẽ chạy với rules mở toang và chỉ in một dòng",
+    "cảnh báo dễ bị bỏ qua. Test tay trên emulator đó sẽ pass mọi thứ và không chứng",
+    "minh được gì cả.",
+    "",
+    "File này dùng dạng object để emulator nạp đúng firestore.rules."
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "storage": {
+      "port": 9199
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
+    "singleProjectMode": true
+  }
+}

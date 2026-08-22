@@ -1,0 +1,125 @@
+rules_version = '2';
+
+// ============================================================================
+// FSC Tracker — Firebase Storage
+// Bucket: fsc-tracker-2128a.firebasestorage.app (asia-southeast1)
+//
+// Nguyên tắc (§12 spec + Nghị định 13/2023):
+//   - Bucket PRIVATE. publicAccessPrevention = enforced ở tầng GCS.
+//   - Ảnh chụp lỗi RẤT dễ chứa thông tin cá nhân học sinh (tên trên màn hình
+//     điểm danh, bảng điểm, hồ sơ y tế). Nên ảnh phải bị cách ly theo trường
+//     đúng như phiếu, không phải "ai đăng nhập cũng xem được".
+//   - Mặc định từ chối tất cả.
+// ============================================================================
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ------------------------------------------------------------------
+    // Trợ giúp. Storage rules đọc được Firestore qua firestore.get().
+    // Mỗi lượt gọi là một lượt đọc TÍNH TIỀN, nên chỉ gọi khi thật cần.
+    // ------------------------------------------------------------------
+
+    function assignment() {
+      return firestore.get(
+        /databases/(default)/documents/support_role_assignments/$(request.auth.uid)
+      ).data;
+    }
+
+    function hasAssignment() {
+      return request.auth != null && firestore.exists(
+        /databases/(default)/documents/support_role_assignments/$(request.auth.uid)
+      );
+    }
+
+    /** Nhân sự PTUD xem được ảnh của mọi trường — họ là người sửa lỗi. */
+    function isPtudStaff() {
+      return hasAssignment() &&
+        assignment().supportRole in ['MODULE_OWNER', 'DEVELOPER', 'PTUD_MANAGER', 'SYS_ADMIN'];
+    }
+
+    function myCampusId() {
+      return hasAssignment() ? assignment().campusId : null;
+    }
+
+    function isApprovedUser() {
+      return request.auth != null && firestore.get(
+        /databases/(default)/documents/users/$(request.auth.uid)
+      ).data.status == 'active';
+    }
+
+    // Chốt chặn mặc định.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // Ảnh đính kèm phiếu hỗ trợ.
+    //
+    // Đường dẫn có MÃ TRƯỜNG: support-tickets/{campusId}/{draftId}/{fileName}
+    //
+    // Vì sao khoá theo trường chứ không theo ticketId: ảnh được upload TRƯỚC
+    // khi phiếu tồn tại (người dùng chọn ảnh rồi mới bấm gửi), nên lúc ghi
+    // chưa có ticketId nào để rules kiểm tra. Mã trường thì biết ngay từ đầu.
+    //
+    // Đánh đổi đã biết: với phiếu SYSTEM_WIDE, trường khác đọc được nội dung
+    // phiếu nhưng KHÔNG đọc được ảnh của trường gốc. Đây là mặc định thận trọng
+    // có chủ đích cho dữ liệu dễ chứa thông tin học sinh. Nếu sau này cần mở,
+    // phải đi qua signed URL do api/ cấp, không phải nới rule này.
+    // ------------------------------------------------------------------
+    match /support-tickets/{campusId}/{draftId}/{fileName} {
+
+      //
+      // isApprovedUser() BẮT BUỘC phải có ở đây, không chỉ ở nhánh write.
+      //
+      // Tắt hoặc xoá một tài khoản KHÔNG xoá bản ghi support_role_assignments
+      // của họ (App.tsx đổi users.status, rejectUser đổi sang 'disabled'; chỉ
+      // clearMemberScope mới xoá bản gán). Thiếu phép kiểm này thì một tài khoản
+      // đã bị vô hiệu vẫn tải về được MỌI ảnh đính kèm của trường mình — trong
+      // khi Firestore đã chặn họ đọc chính cái phiếu chứa ảnh đó.
+      //
+      // Đây là dữ liệu nhạy cảm nhất trong hệ thống: ảnh chụp màn hình điểm
+      // danh, bảng điểm, hồ sơ y tế có tên học sinh (§12, Nghị định 13/2023).
+      allow read: if isApprovedUser() && (isPtudStaff() || myCampusId() == campusId);
+
+      allow write: if request.auth != null
+                   && isApprovedUser()
+                   // Chỉ ghi được vào thư mục của TRƯỜNG MÌNH. Không có dòng
+                   // này thì bất kỳ ai cũng nhét ảnh vào thư mục trường khác.
+                   && myCampusId() == campusId
+                   // §10: tối đa 10MB mỗi file.
+                   && request.resource.size <= 10 * 1024 * 1024
+                   && isAllowedType();
+
+      /**
+       * Ảnh (báo lỗi) và tài liệu (đề xuất tính năng).
+       *
+       * Danh sách LIỆT KÊ TƯỜNG MINH, không dùng matches('.*') cho tài liệu:
+       * một biểu thức lỏng sẽ nhận cả application/x-msdownload và
+       * application/x-sh. Bucket này ai trong trường cũng ghi được, nên nó
+       * không được phép trở thành nơi phát tán file thực thi.
+       *
+       * Cố ý KHÔNG có zip/rar: không kiểm được nội dung bên trong.
+       * Cố ý KHÔNG có video: 10MB video vô dụng, mà mở ra thì tốn băng thông.
+       */
+      function isAllowedType() {
+        let t = request.resource.contentType;
+        return t.matches('image/.*') || t in [
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-powerpoint',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          'text/plain',
+          'text/csv'
+        ];
+      }
+
+      // Không cho xoá: ảnh là bằng chứng của phiếu. Phiếu đã không xoá được thì
+      // ảnh cũng vậy, nếu không người ta xoá bằng chứng sau khi phiếu bị từ chối.
+      allow delete: if false;
+    }
+  }
+}

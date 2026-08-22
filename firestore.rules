@@ -37,7 +37,8 @@ service cloud.firestore {
       let data = getUserData();
       return isAuthenticated() && (
         (data != null && data.role == 'admin') || 
-        (request.auth.token.email == "vietnb4@fpt.edu.vn" && request.auth.token.email_verified == true)
+        (request.auth.token.get('email', '') == "vietnb4@fpt.edu.vn"
+         && request.auth.token.get('email_verified', false) == true)
       );
     }
 
@@ -82,13 +83,39 @@ service cloud.firestore {
     // ===============================================================
 
     // User Profiles
+    //
+    // ⚠️ CỔNG DUYỆT TÀI KHOẢN — đọc trước khi sửa block này.
+    //
+    // Tài khoản mới BẮT BUỘC tạo ra ở trạng thái 'pending' và phải được admin
+    // duyệt + gán campus mới truy cập được hệ thống.
+    //
+    // Hai field quyết định quyền truy cập — 'status' và 'role' — CHỈ admin được ghi.
+    // Trước đây 'status' nằm trong danh sách field người dùng tự sửa, nghĩa là một
+    // tài khoản pending chỉ cần mở devtools tự set status = 'active' là vào thẳng,
+    // cổng duyệt bị vô hiệu mà không cần biết gì về hack. Đừng thêm nó lại.
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == userId && 
-                    (request.resource.data.role == 'user' || isAdmin());
-      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId && 
-                    hasOnlyAllowedFields(['displayName', 'photoURL', 'status', 'uid', 'email']) &&
-                    request.resource.data.role == resource.data.role);
+
+      // Tự tạo hồ sơ lần đầu đăng nhập: ép 'pending', ép role 'user'.
+      // Admin tạo hộ thì không bị ràng buộc.
+      allow create: if isAdmin() || (
+                      isAuthenticated() && request.auth.uid == userId &&
+                      request.resource.data.role == 'user' &&
+                      request.resource.data.status == 'pending'
+                    );
+
+      // Người dùng chỉ đổi được đúng 2 field hiển thị của chính mình.
+      // Dùng diff().affectedKeys() chứ không phải hasOnlyAllowedFields: cái sau
+      // kiểm tra TOÀN BỘ key của document sau khi sửa, nên nó chặn nhầm cả cập nhật
+      // hợp lệ (document có 'role' mà 'role' không nằm trong danh sách cho phép).
+      // 'status', 'role', 'campusId', 'supportRole' không nằm trong affectedKeys
+      // cho phép, nên người dùng không tự nâng quyền được.
+      allow update: if isAdmin() || (
+                      isAuthenticated() && request.auth.uid == userId &&
+                      request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['displayName', 'photoURL'])
+                    );
+
       allow delete: if isAdmin();
     }
 
@@ -96,19 +123,68 @@ service cloud.firestore {
     match /projects/{projectId} {
       allow read: if isAuthenticated();
       allow create: if isAdmin();
-      allow update: if isAdmin() || (isProjectManager(resource.data) && hasOnlyAllowedFields(['name', 'description', 'status']));
+      // diff().affectedKeys() chứ KHÔNG phải hasOnlyAllowedFields().
+      //
+      // hasOnlyAllowedFields kiểm keys của TOÀN BỘ document sau khi ghi. Một dự
+      // án luôn có managers, members, supportModules… nên điều kiện đó không bao
+      // giờ đúng — mà nhánh này lại đồng thời đòi resource.data.managers tồn tại.
+      // Hai vế loại trừ nhau: quản lý dự án chưa từng đổi được tên dự án của
+      // chính mình, chỉ admin làm được. Đúng cái bẫy đã sửa cho users và
+      // notifications, còn sót lại ở đây.
+      allow update: if isAdmin() || (
+                      isProjectManager(resource.data)
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['name', 'description', 'status'])
+                    );
       allow delete: if isAdmin();
 
       // Tasks (Subcollection)
       match /tasks/{taskId} {
         allow read: if isAuthenticated();
         
-        allow create: if isAdmin() || isManager(projectId) || (
+        // Nhánh isSupportTaskCreate() được THÊM VÀO cho module hỗ trợ.
+        // Ba nhánh cũ giữ nguyên từng ký tự.
+        //
+        // Vì sao cần: đầu mối phân hệ tiếp nhận phiếu sẽ sinh task trong project
+        // tương ứng, nhưng họ KHÔNG chắc là manager của project đó — rules cũ
+        // chỉ cho isAdmin() hoặc isManager(projectId).
+        allow create: if isAdmin() || isManager(projectId) || isSupportTaskCreate() || (
           isAuthenticated() && 
           request.resource.data.status == 'pending' &&
           request.resource.data.assignees == [request.auth.uid] &&
           request.resource.data.progress == 0
         );
+
+        /**
+         * Nhân sự PTUD tạo task sinh ra từ một phiếu hỗ trợ.
+         *
+         * Ràng buộc `'ho-tro' in tags` là chốt chặn: nhánh này CHỈ mở cho task
+         * do luồng tiếp nhận phiếu sinh ra, không biến thành đường tạo task tuỳ
+         * ý trong mọi project. acceptTicket() luôn gắn thẻ này.
+         *
+         * progress phải bằng 0: task vừa sinh chưa ai làm gì.
+         */
+        function isSupportTaskCreate() {
+          return isPtudStaff()
+            && 'ho-tro' in request.resource.data.tags
+            && request.resource.data.progress == 0
+            // Chỉ quản lý dự án mới GÁN việc cho người khác. Thành viên trong dự
+            // án vẫn tiếp nhận được phiếu, nhưng chỉ tự nhận việc về mình.
+            && (isSupportProjectManager()
+                || request.resource.data.assignees == [request.auth.uid]);
+        }
+
+        /**
+         * Quản lý dự án theo nghĩa danh sách managers của chính project này.
+         *
+         * Cố ý KHÔNG dùng isManager(projectId) sẵn có: hàm đó còn đòi thêm
+         * user.role == 'manager', nên một cán bộ PTUD được cử làm quản lý một
+         * dự án hỗ trợ sẽ trượt dù đã có tên trong managers.
+         */
+        function isSupportProjectManager() {
+          return request.auth.uid in
+            get(/databases/$(database)/documents/projects/$(projectId)).data.get('managers', []);
+        }
         
         allow update: if isAdmin() || isDirector() || isManager(projectId) || (
           isTaskAssignee(resource.data) && 
@@ -136,7 +212,15 @@ service cloud.firestore {
     match /notifications/{notificationId} {
       allow read: if isAuthenticated() && request.auth.uid == resource.data.targetUserId;
       allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && request.auth.uid == resource.data.targetUserId && hasOnlyAllowedFields(['read']);
+      // diff().affectedKeys() chứ KHÔNG phải hasOnlyAllowedFields().
+      //
+      // hasOnlyAllowedFields kiểm keys của TOÀN BỘ document sau khi ghi, không
+      // phải những key vừa đổi. Một thông báo luôn có targetUserId, message,
+      // time… nên điều kiện đó không bao giờ đúng: bấm vào thông báo để đánh
+      // dấu đã đọc luôn bị từ chối, và chấm đỏ trên chuông không bao giờ tắt.
+      allow update: if isAuthenticated()
+                    && request.auth.uid == resource.data.targetUserId
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
       allow delete: if isAuthenticated() && request.auth.uid == resource.data.targetUserId;
     }
 
@@ -159,6 +243,405 @@ service cloud.firestore {
     // Connection Test
     match /test/connection {
       allow read: if true;
+    }
+
+    // =============================================================
+    // MODULE HỖ TRỢ CAMPUS — mọi collection tiền tố support_
+    // Khối này được THÊM VÀO, không sửa gì phía trên.
+    // =============================================================
+
+    /**
+     * Tài khoản đã được duyệt và cho phép truy cập hệ thống.
+     * Đây là điều kiện nền cho mọi rule của module hỗ trợ: chưa duyệt thì
+     * không đọc được gì, kể cả khi biết chính xác id document.
+     */
+    function isApproved() {
+      let data = getUserData();
+      return isAuthenticated() && data != null && data.status == 'active';
+    }
+
+    /** Bản ghi gán quyền của chính người đang gọi. Null nếu chưa được gán. */
+    function myAssignment() {
+      let path = /databases/$(database)/documents/support_role_assignments/$(request.auth.uid);
+      return exists(path) ? get(path).data : null;
+    }
+
+    function myCampusId() {
+      let a = myAssignment();
+      return a != null ? a.campusId : null;
+    }
+
+    // Danh sách trường.
+    // Đọc: mọi tài khoản ĐÃ DUYỆT. Tên trường không nhạy cảm, và client cần nó
+    // để hiển thị tên thay vì mã trong mọi màn hình.
+    // Ghi: chỉ admin. Trường là dữ liệu tham chiếu, người dùng tự thêm được là
+    // hỏng toàn bộ mô hình phân quyền theo trường.
+    match /support_campuses/{campusId} {
+      allow read: if isApproved();
+      allow create, update: if isAdmin();
+      // Không cho xoá: ticket lịch sử trỏ về campus, xoá là để lại tham chiếu
+      // mồ côi. Tắt bằng isActive = false thay vì xoá.
+      allow delete: if false;
+    }
+
+    // Gán trường + vai trò hỗ trợ.
+    //
+    // Đây là bảng quyết định quyền truy cập của module, nên CHỈ admin được ghi.
+    // Người dùng tự ghi được là tự gán mình vào trường khác và đọc dữ liệu
+    // trường đó — đúng thứ quy tắc cứng §3 cấm.
+    //
+    // Đọc: tự đọc bản ghi của mình (để biết mình thuộc trường nào), admin đọc tất.
+    // Query cả collection chỉ chạy được với admin, vì điều kiện
+    // request.auth.uid == uid không giải được khi list.
+    match /support_role_assignments/{uid} {
+      // Nhân sự PTUD liệt kê được cả collection: họ cần danh sách đồng nghiệp
+      // để chọn người xử lý khi tiếp nhận phiếu. Không mở thì màn tiếp nhận báo
+      // permission-denied và không ai giao việc được.
+      //
+      // Dữ liệu ở đây không nhạy cảm: uid, mã trường, tên vai trò. Không có
+      // thông tin cá nhân nào ngoài những thứ đã nằm ở collection users vốn
+      // mọi tài khoản đăng nhập đều đọc được.
+      allow read: if isAdmin() || isPtudStaff() || (isAuthenticated() && request.auth.uid == uid);
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Dữ liệu tham chiếu: 5 phân hệ, ma trận SLA, lịch làm việc, ngày lễ.
+    //
+    // Đọc: mọi tài khoản đã duyệt. Client cần ma trận SLA để hiện "SLA phản hồi
+    // dự kiến" ngay sau khi gửi phiếu, và cần lịch làm việc để hiển thị hạn xử lý.
+    // Ghi: chỉ admin. Đây là thứ quyết định hạn chót của mọi ticket — người dùng
+    // sửa được là tự nới hạn cho chính mình.
+    //
+    // Seed script dùng Admin SDK nên BỎ QUA toàn bộ khối này. Hàng rào duy nhất
+    // cho script nằm ở scripts/_lib/admin.ts, không phải ở đây.
+    match /support_modules/{moduleId} {
+      allow read: if isApproved();
+      allow write: if isAdmin();
+    }
+
+    match /support_sla_policies/{policyId} {
+      allow read: if isApproved();
+      allow write: if isAdmin();
+    }
+
+    match /support_config/{docId} {
+      allow read: if isApproved();
+      allow write: if isAdmin();
+    }
+
+    /** Vai trò phía PTUD — thấy toàn bộ ticket, không thuộc trường nào. */
+    function isPtudStaff() {
+      let a = myAssignment();
+      return a != null && a.supportRole in ['MODULE_OWNER', 'DEVELOPER', 'PTUD_MANAGER', 'SYS_ADMIN'];
+    }
+
+    // =============================================================
+    // TICKET — quy tắc cứng §3
+    //
+    // "CAMPUS_REPORTER và CAMPUS_FOCAL KHÔNG BAO GIỜ đọc được ticket của campus
+    //  khác, trừ khi ticket có scope = SYSTEM_WIDE và campus họ nằm trong
+    //  ticket_affected_campus."
+    //
+    // Enforce ở ĐÂY, không phải ở tầng giao diện. Lọc trong React chỉ là trải
+    // nghiệm người dùng — mở devtools gọi thẳng Firestore là bỏ qua toàn bộ React.
+    //
+    // Lưu ý về cách Firestore hoạt động: rules KHÔNG lọc kết quả. Nó từ chối cả
+    // truy vấn trừ khi chính ràng buộc của truy vấn chứng minh mọi kết quả đều
+    // đọc được. Vì vậy màn danh sách phải tự mang ràng buộc campus, và đó là lý
+    // do ticketRepository dùng HAI truy vấn tách rời rồi gộp ở client.
+    // =============================================================
+    match /support_tickets/{ticketId} {
+      allow read: if isAdmin() || isPtudStaff() || (
+                    isApproved() && (
+                      resource.data.campusId == myCampusId() ||
+                      (resource.data.scope == 'SYSTEM_WIDE' &&
+                       myCampusId() in resource.data.affectedCampusIds)
+                    )
+                  );
+
+      // Tạo phiếu: chỉ cho trường CỦA MÌNH, tự đứng tên mình, và phải vào đúng
+      // trạng thái TRIAGE. Không ép ba điều kiện này thì người dùng tạo được
+      // phiếu ma cho trường khác, hoặc tự đặt phiếu vào trạng thái đã duyệt.
+      //
+      // GHIM luôn những field thuộc quyền của bước tiếp nhận. Không ghim thì
+      // trường gọi thẳng SDK tạo được phiếu đã đóng dấu sẵn: priority 'P1' để
+      // nhảy lên đầu hàng đợi, dueAt = 0 để hệ thống báo quá hạn ngay lập tức,
+      // triagedBy giả, và affectedCampusIds cài sẵn tên trường khác — danh sách
+      // đó chính là thứ cấp quyền đọc khi đầu mối chuyển phiếu sang SYSTEM_WIDE.
+      //
+      // isCampusContentEdit cấm sửa những field này SAU khi tạo; không ghim lúc
+      // tạo thì lệnh cấm đó chỉ là cửa khoá của một căn phòng không có tường.
+      allow create: if isApproved() &&
+                    request.resource.data.campusId == myCampusId() &&
+                    request.resource.data.reporterUserId == request.auth.uid &&
+                    request.resource.data.status == 'TRIAGE' &&
+                    request.resource.data.scope == 'CAMPUS_LOCAL' &&
+                    // .get(field, null) chứ không phải .field: field VẮNG MẶT làm
+                    // rule vỡ chứ không trả false, và biểu hiện ra ngoài là
+                    // permission-denied không giải thích được. Vắng mặt ở đây
+                    // nghĩa là "chưa đặt", đúng bằng null.
+                    request.resource.data.get('priority', null) == null &&
+                    request.resource.data.get('assigneeUserId', null) == null &&
+                    request.resource.data.get('dueAt', null) == null &&
+                    request.resource.data.get('triagedBy', null) == null &&
+                    request.resource.data.get('triagedAt', null) == null &&
+                    request.resource.data.get('linkedProjectId', null) == null &&
+                    request.resource.data.get('linkedTaskId', null) == null &&
+                    request.resource.data.get('resolvedAt', null) == null &&
+                    request.resource.data.get('closedAt', null) == null &&
+                    request.resource.data.get('reopenCount', 0) == 0 &&
+                    request.resource.data.get('rejectionReason', '') == '' &&
+                    request.resource.data.get('needsInfoRequest', '') == '' &&
+                    request.resource.data.get('affectedCampusIds', [myCampusId()]) == [myCampusId()];
+
+      // Triage, đổi trạng thái, gán người xử lý: chỉ phía PTUD.
+      allow update: if isAdmin() || isPtudStaff() || isMeTooUpdate()
+                    || isCampusContentEdit() || isCampusVerdict();
+
+      /**
+       * Trường nghiệm thu phiếu đã được báo xử lý xong.
+       *
+       * Hai chiều duy nhất: RESOLVED -> CLOSED (hết lỗi thật) hoặc
+       * RESOLVED -> REOPENED (vẫn còn lỗi).
+       *
+       * Vì sao phải mở cho phía trường: người sửa lỗi KHÔNG phải người biết lỗi
+       * đã hết hay chưa. Nếu chỉ phía PTUD đóng được thì "đã xong" là lời tự
+       * khai của chính người làm, và campus không có đường nào nói ngược lại.
+       *
+       * Vì sao hẹp đến thế: mọi chiều khác đều là tự thay đổi tiến trình xử lý
+       * phiếu của mình.
+       */
+      function isCampusVerdict() {
+        let d = request.resource.data;
+        let old = resource.data;
+        return isApproved()
+          && old.campusId == myCampusId()
+          && old.status == 'RESOLVED'
+          && d.status in ['CLOSED', 'REOPENED']
+          && d.diff(old).affectedKeys().hasOnly([
+               'status', 'closedAt', 'resolvedAt', 'reopenCount',
+               'needsInfoRequest', 'slaLastResumedAt', 'updatedAt'
+             ]);
+      }
+
+      /**
+       * Trường sửa nội dung phiếu của MÌNH khi phiếu CHƯA được tiếp nhận.
+       *
+       * Cửa sổ sửa đóng lại ngay khi đầu mối tiếp nhận: từ ACCEPTED trở đi,
+       * người xử lý đã đọc và bắt đầu làm theo nội dung cũ. Cho sửa tiếp là
+       * để nội dung phiếu trôi khỏi thứ mà kỹ thuật viên đang dựa vào.
+       *
+       * Danh sách field dưới đây phải khớp CHÍNH XÁC với CAMPUS_EDITABLE_FIELDS
+       * trong repository/ticketRepository.ts. Lệch nhau thì hoặc người dùng bị
+       * permission-denied không rõ lý do, hoặc rules để lọt field không được sửa.
+       *
+       * Cố ý KHÔNG có trong danh sách: status, scope, priority, assigneeUserId,
+       * dueAt, campusId, reporterUserId, ticketNo, mọi field sla*.
+       */
+      function isCampusContentEdit() {
+        let d = request.resource.data;
+        let old = resource.data;
+        return isApproved()
+          && old.campusId == myCampusId()
+          && old.status in ['TRIAGE', 'NEEDS_INFO']
+          && d.diff(old).affectedKeys().hasOnly([
+               'title', 'description', 'stepsToReproduce', 'expectedResult', 'actualResult',
+               'impactScale', 'hasWorkaround', 'affectedUserRef', 'errorCode',
+               'contactName', 'contactEmail', 'attachments',
+               'normalizedTitle', 'titleTokens', 'bodyTokens', 'updatedAt',
+               // Ba field dưới CHỈ được đổi trong đúng một tình huống, xem ràng buộc kế tiếp.
+               'status', 'slaLastResumedAt', 'needsInfoRequest'
+             ])
+          // Ba field điều phối — status, slaLastResumedAt, needsInfoRequest —
+          // CHỈ được đụng vào trong đúng một tình huống: trường bổ sung xong và
+          // phiếu quay lại hàng đợi.
+          //
+          // Vì sao phải mở chiều đó: §5 quy định trường bổ sung xong thì phiếu
+          // quay lại để đầu mối xem lại. Không mở thì NEEDS_INFO là ngõ cụt.
+          //
+          // Vì sao KHÔNG được đụng lúc khác — hai lỗ hổng thật, QA bắt được:
+          //   1. slaLastResumedAt là đồng hồ SLA. Cho trường ghi tự do nghĩa là
+          //      họ tự bấm dừng/chạy đồng hồ trên phiếu của mình, và cảnh báo
+          //      quá hạn của đội kỹ thuật chạy theo con số do bên yêu cầu đặt.
+          //   2. needsInfoRequest là CÂU HỎI CỦA ĐẦU MỐI. Cho trường ghi đè
+          //      nghĩa là sửa lời người khác, và màn tiếp nhận hiện ra câu mà
+          //      đầu mối chưa từng viết.
+          && (
+               (d.status == old.status
+                && !d.diff(old).affectedKeys()
+                      .hasAny(['status', 'slaLastResumedAt', 'needsInfoRequest']))
+               || (old.status == 'NEEDS_INFO' && d.status == 'TRIAGE'
+                   && d.needsInfoRequest == '')
+             );
+      }
+
+      /**
+       * Trường xoá phiếu của MÌNH khi phiếu chưa được tiếp nhận.
+       *
+       * Cùng cửa sổ với quyền sửa, và vì cùng một lý do: trước ACCEPTED thì
+       * chưa ai đọc, phiếu vẫn là bản nháp của trường. Từ ACCEPTED trở đi đã có
+       * người nhận việc và có task chạy trong module Công việc — xoá lúc đó là
+       * bỏ lại một task trỏ về phiếu không còn tồn tại.
+       *
+       * Cố ý KHÔNG mở cho admin: xoá vĩnh viễn phiếu đang xử lý không phải thao
+       * tác nên có sẵn trên giao diện.
+       */
+      allow delete: if isApproved()
+                    && resource.data.campusId == myCampusId()
+                    && resource.data.status in ['TRIAGE', 'NEEDS_INFO'];
+
+      /**
+       * Ngoại lệ hẹp cho nút "Trường tôi cũng gặp lỗi này" (§6).
+       *
+       * NÓI RÕ hệ quả về quyền đọc, vì nó KHÔNG trung tính:
+       *   - Phiếu CAMPUS_LOCAL: thêm tên trường mình vào danh sách ảnh hưởng
+       *     KHÔNG cho đọc phiếu — rule read đòi scope == 'SYSTEM_WIDE'.
+       *     Cách ly trường vẫn nguyên vẹn.
+       *   - Phiếu SYSTEM_WIDE: thêm vào là ĐỌC ĐƯỢC ngay. Đây là hệ quả có
+       *     chủ đích — một sự cố toàn hệ thống thì trường bị ảnh hưởng có
+       *     quyền theo dõi — nhưng phải ghi ra để người đọc rules sau này
+       *     không tưởng nó trung tính.
+       *
+       * Người dùng trường chỉ được thêm CHÍNH trường mình vào danh sách bị ảnh
+       * hưởng và CHÍNH mình vào danh sách theo dõi. Không xoá được ai, không
+       * đụng được trường nào khác, không đổi được trạng thái hay độ ưu tiên.
+       *
+       * hasAll(...) chặn việc xoá: tập mới phải chứa trọn tập cũ.
+       * hasOnly(cũ + [của tôi]) chặn việc thêm bừa: chỉ được thêm đúng một
+       * giá trị, và giá trị đó phải là của chính người gọi.
+       *
+       * Lưu ý: quyền này KHÔNG kéo theo quyền đọc. Trường B bấm "cũng gặp lỗi
+       * này" trên phiếu CAMPUS_LOCAL của trường A vẫn không đọc được nội dung
+       * phiếu đó. Chỉ khi đầu mối phân hệ chuyển phiếu sang SYSTEM_WIDE thì
+       * trường B mới thấy — đúng như §2 quy định phạm vi do đầu mối xác định.
+       */
+      function isMeTooUpdate() {
+        let d = request.resource.data;
+        let old = resource.data;
+        // .get(field, mặc định) chứ không phải .field: document thiếu field sẽ
+        // làm rule VỠ chứ không phải trả false, và biểu hiện ra ngoài là
+        // permission-denied không giải thích được. Phiếu do createTicket tạo
+        // luôn có đủ hai mảng này, nhưng dữ liệu nhập tay hoặc phiếu di trú từ
+        // hệ cũ thì không chắc.
+        let oldCampuses = old.get('affectedCampusIds', []);
+        let oldWatchers = old.get('watcherUids', []);
+        return isApproved()
+          && d.diff(old).affectedKeys().hasOnly(['affectedCampusIds', 'watcherUids', 'updatedAt'])
+          && d.affectedCampusIds.hasAll(oldCampuses)
+          && d.affectedCampusIds.hasOnly(oldCampuses.concat([myCampusId()]))
+          && d.get('watcherUids', []).hasAll(oldWatchers)
+          && d.get('watcherUids', []).hasOnly(oldWatchers.concat([request.auth.uid]));
+      }
+    }
+
+    // Bản gương mỏng phục vụ quét trùng.
+    //
+    // Cố ý cho ĐỌC XUYÊN TRƯỜNG: §6 quy định panel quét trùng hiển thị "mã
+    // ticket, tiêu đề, campus, trạng thái" của ứng viên, và nút "Trường tôi
+    // cũng gặp lỗi này" chỉ có nghĩa khi người dùng thấy được phiếu của trường
+    // khác. Đây là ngoại lệ CÓ CHỦ ĐÍCH của §3, không phải sơ hở.
+    //
+    // Bản gương chỉ chứa tiêu đề đã chuẩn hoá và token — không có mô tả, không
+    // có log, không có mã học sinh. Phần nhạy cảm nằm ở support_tickets và vẫn
+    // bị cách ly theo trường.
+    match /support_ticket_index/{ticketId} {
+      allow read: if isApproved();
+
+      // Bản gương được ghi trong CÙNG transaction tạo phiếu, và transaction đó
+      // chạy ở TRÌNH DUYỆT. Nên client bắt buộc phải create được ở đây.
+      //
+      // Bài học: rule cũ để `allow write: if false` vì tưởng bản gương do máy
+      // chủ sinh ra. Hậu quả là cả transaction 4 lượt ghi bị từ chối, và người
+      // dùng chỉ thấy "permission-denied" ở bước cuối sau khi đã điền xong form
+      // — không có gì chỉ ra rằng nguyên nhân nằm ở một collection khác.
+      // Khi thêm bất kỳ lượt ghi nào vào createTicket, phải mở rule tương ứng.
+      //
+      // Ràng buộc: chỉ ghi được bản gương cho trường của chính mình.
+      //
+      // Ràng buộc chặt như update. Bản gương là bề mặt DUY NHẤT mà cả 18 trường
+      // cùng đọc được (rule read ngay trên). Không ràng buộc thì một trường ghi
+      // được một dòng gương bịa: tiêu đề tuỳ ý, mã phiếu không tồn tại — và
+      // panel cảnh báo trùng đem dòng đó hiện cho mọi trường khác.
+      allow create: if isApproved()
+                    && request.resource.data.campusId == myCampusId()
+                    && request.resource.data.status == 'TRIAGE'
+                    && request.resource.data.keys().hasOnly([
+                         'ticketNo', 'moduleId', 'campusId', 'status', 'title', 'type',
+                         'normalizedTitle', 'titleTokens', 'bodyTokens', 'createdAt'
+                       ]);
+
+      // Sửa bản gương: phía PTUD khi đổi trạng thái, HOẶC trường khi sửa nội
+      // dung phiếu chưa được tiếp nhận (đổi tiêu đề là đổi token quét trùng —
+      // không đồng bộ thì phiếu trùng thật sẽ không còn được phát hiện).
+      //
+      // 'status' PHẢI nằm trong danh sách. Trường bổ sung xong thì phiếu quay
+      // về TRIAGE, và bản gương buộc phải đi cùng — nếu không thì cả batch bị
+      // từ chối và trường KHÔNG gửi lại được phiếu, biến NEEDS_INFO thành ngõ
+      // cụt đúng như trước khi có tính năng này. Bản gương thiếu 'status' là
+      // lỗi lặng: người dùng chỉ thấy permission-denied ở nút Gửi lại, không có
+      // gì chỉ ra nguyên nhân nằm ở một collection khác.
+      allow update: if isAdmin() || isPtudStaff() || (
+                      isApproved()
+                      && resource.data.campusId == myCampusId()
+                      && (
+                           // Còn sửa nội dung được: phiếu chưa ai nhận.
+                           (resource.data.status in ['TRIAGE', 'NEEDS_INFO']
+                            && request.resource.data.diff(resource.data).affectedKeys()
+                                 .hasOnly(['normalizedTitle', 'titleTokens', 'bodyTokens', 'status', 'title']))
+                           // Nghiệm thu: CHỈ đổi status, không đụng nội dung.
+                           //
+                           // Phiếu gốc cấm trường sửa nội dung từ ACCEPTED trở đi,
+                           // nhưng bản gương lại cho — nên trường đổi được tiêu đề
+                           // hiện cho cả 18 trường trong panel quét trùng, trong khi
+                           // phiếu thật vẫn mang tiêu đề cũ.
+                           || (resource.data.status == 'RESOLVED'
+                               && request.resource.data.diff(resource.data).affectedKeys()
+                                    .hasOnly(['status']))
+                         )
+                      // Cùng những chiều duy nhất mà phiếu gốc cho phép:
+                      //   NEEDS_INFO -> TRIAGE          (trường bổ sung xong)
+                      //   RESOLVED   -> CLOSED/REOPENED (trường nghiệm thu)
+                      // Mở rộng hơn là để trường tự nâng phiếu của mình lên đã duyệt.
+                      && (request.resource.data.status == resource.data.status
+                          || (resource.data.status == 'NEEDS_INFO'
+                              && request.resource.data.status == 'TRIAGE')
+                          || (resource.data.status == 'RESOLVED'
+                              && request.resource.data.status in ['CLOSED', 'REOPENED']))
+                    );
+
+      // Bản gương phải chết cùng phiếu. Để lại là phiếu đã xoá vẫn hiện ra
+      // trong cảnh báo trùng, và người dùng đi tìm một mã phiếu không tồn tại.
+      allow delete: if isApproved()
+                    && resource.data.campusId == myCampusId()
+                    && resource.data.status in ['TRIAGE', 'NEEDS_INFO'];
+    }
+
+    // Counter và khoá mã phiếu.
+    // Client PHẢI ghi được vì việc cấp số nằm trong transaction tạo phiếu ở
+    // trình duyệt. Rủi ro chấp nhận được: giá trị ở đây không phải dữ liệu
+    // nghiệp vụ, phá hoại chỉ làm hỏng đánh số chứ không lộ dữ liệu của ai.
+    // Khoá mã là create-only để không ai chiếm được mã của phiếu đã tồn tại.
+    match /support_counters/{shardId} {
+      allow read: if isApproved();
+      allow create: if isApproved();
+
+      // seq CHỈ được tăng, trừ khi sang kỳ mới (đầu tháng thì đếm lại từ 1).
+      //
+      // Trước đây là `write: if isApproved()`: bất kỳ tài khoản đã duyệt nào
+      // cũng hạ được seq của một phân hệ xuống. Hạ xong thì mọi phiếu tiếp theo
+      // đâm vào bản khoá mã đã tồn tại, mà bản khoá thì không xoá được — phân
+      // hệ đó tắc đường tạo phiếu cho tới khi có người sửa tay trong Firestore.
+      allow update: if isApproved() && (
+                      request.resource.data.period != resource.data.period
+                      || request.resource.data.seq > resource.data.seq
+                    );
+      allow delete: if false;
+    }
+    match /support_ticket_numbers/{ticketNo} {
+      allow read: if isApproved();
+      allow create: if isApproved();
+      allow update, delete: if false;
     }
   }
 }
