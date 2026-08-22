@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext, Component } from 'react';
+import React, { useState, useEffect, useMemo, createContext, useContext, Component } from 'react';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -17,6 +17,7 @@ import {
   getDocs,
   setDoc, 
   addDoc, 
+  writeBatch,
   updateDoc, 
   deleteDoc, 
   Timestamp,
@@ -67,7 +68,12 @@ import {
   Edit3,
   FileText,
   Send,
-  Calendar
+  Calendar,
+  LifeBuoy,
+  Copy,
+  RefreshCw,
+  ChevronLeft,
+  ArrowUpDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -84,16 +90,51 @@ import {
   Legend
 } from 'recharts';
 import { format, addDays } from 'date-fns';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from './firebase';
 import { Project, Task, SubTask, Review, UserProfile, ProjectStatus, TaskStatus, UserRole, TaskComment, Priority, Invitation } from './types';
 
-// Utility for Tailwind classes
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+// Primitive dùng chung với src/modules/*. Trước đây cn/Card/Button/Badge được
+// định nghĩa private ngay trong file này nên module khác không dùng lại được.
+// Bản trong components/ui.tsx giữ nguyên class, và vá thêm variant "outline"
+// cùng prop "size" mà file này vốn đã gọi ở 12 chỗ nhưng chưa từng được khai báo.
+import { Badge, Button, Card, StateBlock, cn } from './components/ui';
+
+/**
+ * Chuẩn hoá task đọc từ Firestore.
+ *
+ * Vì sao cần: giao diện đọc thẳng `task.subtasks.length`, `task.comments.map(...)`
+ * ở khoảng 15 chỗ. Một document THIẾU bất kỳ mảng nào trong số đó sẽ ném
+ * TypeError và ErrorBoundary nuốt trọn cả màn Công việc — người dùng chỉ thấy
+ * "Đã có lỗi xảy ra", không biết vì sao và mất luôn quyền dùng phần đó.
+ *
+ * Document thiếu field là chuyện có thật: task tạo từ luồng khác, dữ liệu di
+ * trú, hoặc ghi bằng script. Vá ở ĐÂY — nơi duy nhất dữ liệu đi từ Firestore
+ * vào React — thay vì rải optional chaining khắp 15 chỗ và vẫn sót.
+ */
+function normalizeTask(raw: any): Task {
+  return {
+    ...raw,
+    subtasks: raw?.subtasks ?? [],
+    comments: raw?.comments ?? [],
+    attachedImages: raw?.attachedImages ?? [],
+    assignees: raw?.assignees ?? [],
+    reviewers: raw?.reviewers ?? [],
+    cc: raw?.cc ?? [],
+    tags: raw?.tags ?? [],
+    progress: raw?.progress ?? 0,
+  } as Task;
 }
+import { PendingGate } from './modules/support/components/PendingGate';
+import { SupportAdminView } from './modules/support/components/admin/SupportAdminView';
+import { SupportView } from './modules/support/components/SupportView';
+import { PtudSupportView } from './modules/support/components/PtudSupportView';
+import { useSupportRole } from './modules/support/hooks/useSupportRole';
+import { useNavBadges } from './modules/support/hooks/useNavBadges';
+import { syncTicketFromTask } from './modules/support/repository/ticketRepository';
+import { MemberScopeCell } from './modules/support/components/admin/MemberScopeCell';
+import { watchRoleAssignments } from './modules/support/repository/userAdminRepository';
+import { watchCampuses } from './modules/support/repository/campusRepository';
+import type { Campus, SupportRoleAssignment } from './modules/support/types';
 
 const getProgressColor = (progress: number) => {
   if (progress <= 30) return 'bg-red-500';
@@ -157,7 +198,10 @@ const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             animate={{ opacity: 1, y: 0, x: '-50%' }}
             exit={{ opacity: 0, y: 50, x: '-50%' }}
             className={cn(
-              "fixed bottom-8 left-1/2 z-[200] px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 min-w-[300px]",
+              // bottom-24 trên mobile: nav dưới cùng nằm ở bottom-0, để bottom-8
+              // thì mọi toast đều đè lên thanh điều hướng. Desktop không có nav
+              // dưới nên giữ bottom-8.
+              "fixed bottom-24 lg:bottom-8 left-1/2 z-[200] px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 min-w-[300px] max-w-[calc(100vw-2rem)]",
               toast.type === 'success' ? "bg-emerald-600 text-white" : 
               toast.type === 'error' ? "bg-red-600 text-white" : "bg-slate-800 text-white"
             )}
@@ -233,15 +277,24 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
           } else {
             console.log('AuthProvider: Creating new profile');
             // Default role is 'user' for everyone except the hardcoded admin
-            const defaultRole: UserRole = email === 'vietnb4@fpt.edu.vn' ? 'admin' : 'user';
-            
+            const isBootstrapAdmin = email === 'vietnb4@fpt.edu.vn';
+            const defaultRole: UserRole = isBootstrapAdmin ? 'admin' : 'user';
+
+            // CỔNG DUYỆT: tài khoản mới ra đời ở trạng thái 'pending'. Chỉ admin
+            // mới chuyển sang 'active' được, và việc đó đi kèm gán trường
+            // (xem UserApprovalQueue). firestore.rules ép đúng điều này ở tầng dữ
+            // liệu — sửa dòng này thành 'active' cũng không qua được rules.
+            //
+            // Ngoại lệ DUY NHẤT là tài khoản admin gốc: nếu nó cũng phải chờ duyệt
+            // thì không còn ai trên đời duyệt được cho nó, hệ thống tự khoá chính mình.
+            // firestore.rules cho phép đúng ngoại lệ này qua isAdmin().
             const newProfile: UserProfile = {
               uid: user.uid,
               displayName: user.displayName || 'User',
               email: email,
               photoURL: user.photoURL || '',
               role: defaultRole,
-              status: 'active'
+              status: isBootstrapAdmin ? 'active' : 'pending'
             };
             await setDoc(doc(db, 'users', user.uid), newProfile);
             setProfile(newProfile);
@@ -338,12 +391,6 @@ const useAuth = () => {
 };
 
 // Components
-const Card: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ children, className, ...props }) => (
-  <div className={cn("bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden", className)} {...props}>
-    {children}
-  </div>
-);
-
 // Comment Prompt Modal
 const CommentPromptModal = ({ 
   title, 
@@ -435,6 +482,9 @@ const TaskCard: React.FC<{
         progress,
         status: newStatus
       });
+      // Phiếu hỗ trợ chạy theo công việc: tiến độ >0 = đang xử lý, 100% =
+      // đã khắc phục, nghiệm thu xong = hoàn tất. Best-effort, không chặn.
+      void syncTicketFromTask(task.projectId, task.id);
 
       // Send notifications for status/progress change
       if (newStatus !== task.status || progress !== task.progress) {
@@ -482,6 +532,9 @@ const TaskCard: React.FC<{
     try {
       if (!task.projectId) throw new Error('Missing projectId');
       await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), { progress, status: newStatus });
+      // Phiếu hỗ trợ chạy theo công việc: tiến độ >0 = đang xử lý, 100% =
+      // đã khắc phục, nghiệm thu xong = hoàn tất. Best-effort, không chặn.
+      void syncTicketFromTask(task.projectId, task.id);
 
       // Send notifications for progress change
       if (progress !== task.progress || newStatus !== task.status) {
@@ -816,49 +869,124 @@ const TaskListItem: React.FC<{
   );
 };
 
-const Button = ({ 
-  children, 
-  variant = 'primary', 
-  className, 
-  ...props 
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' }) => {
-  const variants = {
-    primary: "bg-indigo-600 text-white hover:bg-indigo-700",
-    secondary: "bg-slate-100 text-slate-900 hover:bg-slate-200",
-    ghost: "bg-transparent text-slate-600 hover:bg-slate-50",
-    danger: "bg-red-50 text-red-600 hover:bg-red-100"
-  };
-  return (
-    <button 
-      className={cn("px-4 py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50", variants[variant], className)} 
-      {...props}
-    >
-      {children}
-    </button>
-  );
-};
-
-const Badge = ({ children, variant = 'neutral', className }: { children: React.ReactNode; variant?: 'neutral' | 'success' | 'warning' | 'info' | 'danger' | 'primary' | 'sky'; className?: string }) => {
-  const variants = {
-    neutral: "bg-slate-100 text-slate-600",
-    success: "bg-emerald-100 text-emerald-700",
-    warning: "bg-amber-100 text-amber-700",
-    info: "bg-blue-100 text-blue-700",
-    danger: "bg-red-100 text-red-700",
-    primary: "bg-indigo-100 text-indigo-700",
-    sky: "bg-sky-100 text-sky-700"
-  };
-  return (
-    <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider", variants[variant], className)}>
-      {children}
-    </span>
-  );
-};
+/**
+ * Bảng công việc dùng chung.
+ *
+ * Trước đây "Công việc của tôi" ở Tổng quan và màn Công việc render dạng THẺ,
+ * trong khi Tổng quan lại đã có sẵn một bảng cho danh sách khác — hai kiểu trình
+ * bày cho cùng một loại dữ liệu, trên cùng một màn hình.
+ *
+ * Bảng đọc nhanh hơn thẻ khi cần so sánh nhiều dòng: mắt quét theo cột (hạn,
+ * tiến độ, trạng thái) thay vì phải đọc lại nhãn ở từng thẻ.
+ * Kiểu dáng bám đúng bảng vốn có của app, không tự đặt kiểu mới.
+ */
+const TaskTable: React.FC<{
+  tasks: Task[];
+  users: UserProfile[];
+  projects: Project[];
+  onOpen: (task: Task) => void;
+  emptyText?: string;
+}> = ({ tasks, users, projects, onOpen, emptyText = 'Chưa có công việc nào' }) => (
+  <div className="overflow-x-auto">
+    <table className="w-full text-left border-collapse">
+      <thead>
+        <tr className="bg-slate-50 border-b border-slate-200">
+          <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Công việc</th>
+          <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Người phụ trách</th>
+          <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Tiến độ</th>
+          <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Ưu tiên</th>
+          <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Deadline</th>
+          <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Trạng thái</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+        {tasks.length > 0 ? tasks.map((task) => {
+          const assigneeProfiles = users.filter(u => task.assignees?.includes(u.uid));
+          return (
+            <tr
+              key={task.id}
+              className="hover:bg-slate-50 transition-colors cursor-pointer"
+              onClick={() => onOpen(task)}
+            >
+              <td className="px-4 py-3">
+                <div className="text-sm font-medium text-slate-900 mb-1">{task.title}</div>
+                <div className="flex flex-wrap gap-1 mb-1">
+                  {task.status === 'pending' && (
+                    <Badge variant="warning" className="text-[8px] py-0 px-1">CẦN DUYỆT</Badge>
+                  )}
+                  {task.status === 'review' && (
+                    <Badge variant="sky" className="text-[8px] py-0 px-1">NGHIỆM THU</Badge>
+                  )}
+                  {isTaskOverdue(task) && (
+                    <Badge variant="danger" className="text-[8px] py-0 px-1">QUÁ HẠN</Badge>
+                  )}
+                  {task.tags?.includes('ho-tro') && (
+                    <Badge variant="primary" className="text-[8px] py-0 px-1">HỖ TRỢ</Badge>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-400">{projects.find(p => p.id === task.projectId)?.name}</div>
+              </td>
+              <td className="px-4 py-3">
+                <div className="flex -space-x-2 overflow-hidden">
+                  {assigneeProfiles.map((u, i) => (
+                    <img key={i} src={u.photoURL} className="w-6 h-6 rounded-full border-2 border-white" title={u.displayName} referrerPolicy="no-referrer" />
+                  ))}
+                  {assigneeProfiles.length === 0 && <span className="text-xs text-slate-400 italic">Chưa giao</span>}
+                </div>
+              </td>
+              <td className="px-4 py-3">
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={cn("h-full", getProgressColor(task.progress || 0))} style={{ width: `${task.progress || 0}%` }} />
+                  </div>
+                  {/* tabular-nums: cột phần trăm không nhảy khi số đổi bề rộng */}
+                  <span className="text-[10px] font-bold text-slate-600 tabular-nums w-8 text-right">{task.progress || 0}%</span>
+                </div>
+              </td>
+              <td className="px-4 py-3 text-center">
+                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                  task.priority === 'critical' ? 'bg-purple-100 text-purple-600' :
+                  task.priority === 'high' ? 'bg-red-100 text-red-600' :
+                  task.priority === 'medium' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'
+                }`}>
+                  {(task.priority || 'low').toUpperCase()}
+                </span>
+              </td>
+              <td className="px-4 py-3">
+                <span className={cn("text-xs tabular-nums", getDeadlineStyle(task.date, task.status))}>{task.date || '—'}</span>
+              </td>
+              <td className="px-4 py-3">
+                <Badge variant={
+                  task.status === 'done' ? 'success' :
+                  task.status === 'review' ? 'sky' :
+                  task.status === 'rejected' ? 'danger' :
+                  task.status === 'in-progress' ? 'info' :
+                  task.status === 'pending' ? 'warning' : 'neutral'
+                }>
+                  {task.status === 'pending' ? 'CHỜ DUYỆT' :
+                   task.status === 'todo' ? 'SẴN SÀNG' :
+                   task.status === 'in-progress' ? 'ĐANG LÀM' :
+                   task.status === 'review' ? 'CHỜ NGHIỆM THU' :
+                   task.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
+                </Badge>
+              </td>
+            </tr>
+          );
+        }) : (
+          <tr>
+            <td colSpan={6} className="px-4 py-8 text-center text-slate-400 text-sm">{emptyText}</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+);
 
 const NotificationCenter = () => {
   const { profile } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [marking, setMarking] = useState(false);
 
   useEffect(() => {
     if (!profile) return;
@@ -883,16 +1011,61 @@ const NotificationCenter = () => {
     }
   };
 
+  /**
+   * Cán bộ trường không có nút nào khác để hạ số xuống.
+   *
+   * Với họ thanh điều hướng chỉ có một mục và họ bị đẩy thẳng vào đó, nên quy
+   * tắc "mở mục nào thì mục đó coi như đã xem" không áp dụng được. Không có nút
+   * này thì số trên chuông chỉ có tăng.
+   */
+  const markAllAsRead = async () => {
+    const ids = notifications.filter(n => !n.read).map(n => n.id).slice(0, 400);
+    if (ids.length === 0) return;
+    setMarking(true);
+    try {
+      const batch = writeBatch(db);
+      for (const id of ids) batch.update(doc(db, 'notifications', id), { read: true });
+      await batch.commit();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setMarking(false);
+    }
+  };
+
+  /**
+   * Bấm vào thông báo của một phiếu thì MỞ phiếu đó, không chỉ đánh dấu đã đọc.
+   *
+   * Dùng sự kiện window thay vì đổi URL rồi tải lại trang: tải lại làm mất
+   * trạng thái đang gõ dở của người dùng, mà thông báo thì hay đến giữa lúc
+   * họ đang làm việc khác.
+   */
+  const openNotification = (n: any) => {
+    void markAsRead(n.id);
+    if (n.ticketNo) {
+      setIsOpen(false);
+      window.dispatchEvent(new CustomEvent('fsc:open-ticket', { detail: String(n.ticketNo) }));
+    }
+  };
+
+  /** Icon và màu suy từ nội dung: phiếu hỗ trợ hay công việc. */
+  const kindOf = (n: any) => {
+    if (n.ticketId) return { Icon: LifeBuoy, cls: 'bg-sky-50 text-sky-600', label: 'Yêu cầu hỗ trợ' };
+    if (n.taskId) return { Icon: CheckSquare, cls: 'bg-indigo-50 text-indigo-600', label: 'Công việc' };
+    return { Icon: Bell, cls: 'bg-slate-100 text-slate-500', label: 'Thông báo' };
+  };
+
   return (
     <div className="relative">
       <button 
         onClick={() => setIsOpen(!isOpen)}
+        aria-label={unreadCount > 0 ? `${unreadCount} thông báo chưa đọc` : 'Thông báo'}
         className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors relative"
       >
         <Bell size={20} />
         {unreadCount > 0 && (
-          <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white">
-            {unreadCount}
+          <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 bg-red-500 text-white text-[10px] font-bold flex items-center justify-center rounded-full border-2 border-white">
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
@@ -905,28 +1078,65 @@ const NotificationCenter = () => {
               initial={{ opacity: 0, y: 10, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 10, scale: 0.95 }}
-              className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 overflow-hidden"
+              className="absolute right-0 mt-2 w-[22rem] bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 overflow-hidden"
             >
-              <div className="p-4 border-b border-slate-50 flex justify-between items-center">
+              <div className="p-4 border-b border-slate-100 flex justify-between items-center gap-2">
                 <h3 className="font-bold text-slate-900">Thông báo</h3>
-                <span className="text-xs text-slate-400">{unreadCount} tin mới</span>
-              </div>
-              <div className="max-h-96 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <div className="p-8 text-center text-slate-400 text-sm">Không có thông báo nào</div>
+                {unreadCount > 0 ? (
+                  <button
+                    onClick={markAllAsRead}
+                    disabled={marking}
+                    className="text-xs font-semibold text-indigo-600 hover:underline disabled:opacity-50"
+                  >
+                    {marking ? 'Đang lưu…' : `Đánh dấu tất cả đã đọc (${unreadCount})`}
+                  </button>
                 ) : (
-                  notifications.map(n => (
-                    <div 
-                      key={n.id} 
-                      onClick={() => markAsRead(n.id)}
-                      className={cn("p-4 border-b border-slate-50 hover:bg-slate-50 transition-colors cursor-pointer", !n.read && "bg-indigo-50/30")}
-                    >
-                      <p className="text-sm text-slate-700 leading-snug">{n.message}</p>
-                      <span className="text-[10px] text-slate-400 mt-1 block">
-                        {format(n.time?.toDate() || new Date(), 'HH:mm dd/MM')}
-                      </span>
-                    </div>
-                  ))
+                  <span className="text-xs text-slate-400">Đã đọc hết</span>
+                )}
+              </div>
+              <div className="max-h-[26rem] overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <Bell size={22} className="mx-auto mb-2 text-slate-300" />
+                    <p className="text-sm text-slate-500">Chưa có thông báo nào</p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Khi yêu cầu của bạn được tiếp nhận hoặc xử lý xong, thông báo sẽ hiện ở đây.
+                    </p>
+                  </div>
+                ) : (
+                  notifications.map(n => {
+                    const k = kindOf(n);
+                    return (
+                      <button
+                        key={n.id}
+                        onClick={() => openNotification(n)}
+                        className={cn(
+                          "w-full flex gap-3 p-3.5 border-b border-slate-50 text-left hover:bg-slate-50 transition-colors",
+                          !n.read && "bg-indigo-50/40"
+                        )}
+                      >
+                        <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", k.cls)}>
+                          <k.Icon size={15} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                              {k.label}
+                            </span>
+                            {n.ticketNo && (
+                              <span className="font-mono text-[10px] font-bold text-slate-500">{n.ticketNo}</span>
+                            )}
+                            {!n.read && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />}
+                          </span>
+                          <span className="mt-0.5 block text-sm leading-snug text-slate-700">{n.message}</span>
+                          <span className="mt-1 block text-[10px] text-slate-400">
+                            {format(n.time?.toDate() || new Date(), 'HH:mm dd/MM')}
+                            {n.ticketNo && ' · Bấm để mở yêu cầu'}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })
                 )}
               </div>
             </motion.div>
@@ -1195,6 +1405,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         subtasks: newSubtasks,
         progress
       });
+      void syncTicketFromTask(task.projectId, task.id);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `projects/${task.projectId}/tasks/${task.id}`);
     }
@@ -1250,6 +1461,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         subtasks: newSubtasks,
         progress
       });
+      void syncTicketFromTask(task.projectId, task.id);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `projects/${task.projectId}/tasks/${task.id}`);
     }
@@ -1460,6 +1672,24 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
               <span className="text-sm font-medium">{format(new Date(editedTask.date), 'dd/MM/yyyy')}</span>
             </div>
             <h2 className="text-xl font-bold text-slate-900 ml-2">{editedTask.title}</h2>
+            {/* Đường về phiếu hỗ trợ đã sinh ra công việc này. Không có nó thì
+                người xử lý muốn đọc lại mô tả gốc phải tự đi tìm mã phiếu
+                trong tiêu đề rồi gõ tay vào ô tìm kiếm bên module Hỗ trợ. */}
+            {(task as any).supportTicketNo && (
+              <button
+                type="button"
+                title="Mở phiếu hỗ trợ gốc"
+                onClick={() => {
+                  onClose();
+                  window.dispatchEvent(new CustomEvent('fsc:goto-support', {
+                    detail: String((task as any).supportTicketNo),
+                  }));
+                }}
+                className="ml-1 inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 font-mono text-[11px] font-bold text-sky-700 transition-colors hover:bg-sky-100"
+              >
+                <LifeBuoy size={13} /> {(task as any).supportTicketNo}
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {(isAdmin || isManager) && (
@@ -1515,6 +1745,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                       
                       try {
                         await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), { progress, status: newStatus });
+                        void syncTicketFromTask(task.projectId, task.id);
                       } catch (error) {
                         handleFirestoreError(error, OperationType.UPDATE, `projects/${task.projectId}/tasks/${task.id}`);
                       }
@@ -2208,11 +2439,11 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
     // Real-time tasks across all projects
     const tasksQ = query(collectionGroup(db, 'tasks'));
     const tasksUnsubscribe = onSnapshot(tasksQ, (snapshot) => {
-      const tasksData = snapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        projectId: doc.ref.parent.parent?.id || '', 
-        ...doc.data() 
-      } as Task));
+      const tasksData = snapshot.docs.map(doc => normalizeTask({
+        id: doc.id,
+        projectId: doc.ref.parent.parent?.id || '',
+        ...doc.data()
+      }));
       setAllTasks(tasksData);
       setLoading(false);
     }, (error) => {
@@ -2451,45 +2682,20 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
               )}
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredDashboardTasks.length === 0 ? (
-                <div className="col-span-full p-12 text-center bg-white rounded-2xl border border-dashed border-slate-200 shadow-sm">
-                  <CheckCircle2 className="mx-auto text-slate-200 mb-4" size={48} />
-                  <p className="text-slate-500 font-medium">Không tìm thấy công việc nào phù hợp.</p>
-                </div>
-              ) : (
-                filteredDashboardTasks.map((task) => (
-                  <TaskCard 
-                    key={task.id} 
-                    task={task} 
-                    projectManagers={projects.find(p => p.id === task.projectId)?.managers || []}
-                    onUpdateStatus={async (t, s, c) => {
-                      try {
-                        await updateDoc(doc(db, `projects/${t.projectId}/tasks`, t.id), { status: s });
-                        
-                        // Send notifications for status change
-                        const targets = [...new Set([...(t.assignees || []), ...(t.reviewers || []), ...(t.cc || []), ...(projects.find(p => p.id === t.projectId)?.managers || [])])].filter(id => id !== profile?.uid);
-                        for (const targetId of targets) {
-                          let message = `Công việc "${t.title}" đã chuyển sang trạng thái: ${s}`;
-                          if (s === 'review') message = `Công việc "${t.title}" đang chờ bạn nghiệm thu`;
-                          if (s === 'done') message = `Công việc "${t.title}" đã hoàn thành`;
-                          
-                          await addDoc(collection(db, 'notifications'), {
-                            targetUserId: targetId,
-                            message,
-                            taskId: t.id,
-                            read: false,
-                            time: Timestamp.now()
-                          });
-                        }
-                      } catch (error) {
-                        handleFirestoreError(error, OperationType.UPDATE, `projects/${t.projectId}/tasks/${t.id}`);
-                      }
-                    }} 
-                  />
-                ))
-              )}
-            </div>
+            {/* Dạng BẢNG, giống hệt bảng mà admin/quản lý đang thấy.
+                Trước đây role='user' render dạng thẻ còn role khác render bảng —
+                cùng một loại dữ liệu, hai kiểu trình bày, tuỳ vai trò. Người
+                dùng thường là người có NHIỀU việc nhất, mà thẻ lại là dạng khó
+                so sánh nhiều dòng nhất. */}
+            <Card>
+              <TaskTable
+                tasks={filteredDashboardTasks}
+                users={users}
+                projects={projects}
+                onOpen={setEditingTask}
+                emptyText="Không tìm thấy công việc nào phù hợp."
+              />
+            </Card>
           </div>
         ) : (
           // Manager/Admin Project List View
@@ -2959,18 +3165,40 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
   );
 };
 
-const MyTasksView = () => {
+const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onOpened?: () => void }) => {
   const { profile } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  // Bảng công việc hiện avatar người phụ trách nên cần danh bạ người dùng.
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  // Bấm một dòng trong bảng mở đúng modal chỉnh sửa mà mọi màn khác dùng.
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'priority' | 'deadline'>('newest');
   const [filterStatus, setFilterStatus] = useState<TaskStatus | 'overdue' | 'all'>('all');
 
+  // Mở thẳng một công việc khi người dùng bấm "Mở công việc" từ phiếu hỗ trợ.
+  // Chờ danh sách về rồi mới mở: lúc bấm thì màn này còn chưa dựng xong.
+  useEffect(() => {
+    if (!openTaskId) return;
+    const t = tasks.find((x) => x.id === openTaskId);
+    if (!t) return;
+    setEditingTask(t);
+    // Dọn yêu cầu NGAY sau khi mở. Không dọn thì mỗi lượt onSnapshot của
+    // collectionGroup (tức mỗi lần bất kỳ công việc nào của mình đổi, kể cả do
+    // chính mình kéo thanh tiến độ) lại chạy lại effect này và bật lại modal
+    // vừa đóng — người dùng đóng bao nhiêu lần nó mở lại bấy nhiêu lần.
+    onOpened?.();
+  }, [openTaskId, tasks, onOpened]);
+
   useEffect(() => {
     if (!profile) return;
     
+    const usersUnsub = onSnapshot(collection(db, 'users'), (snap) => {
+      setUsers(snap.docs.map(d => d.data() as UserProfile));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'users'));
+
     // Fetch projects to get names
     const projectsUnsub = onSnapshot(collection(db, 'projects'), (snapshot) => {
       setProjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Project)));
@@ -2988,7 +3216,7 @@ const MyTasksView = () => {
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const myTasks = snapshot.docs.map(doc => {
-        const data = doc.data() as Task;
+        const data = normalizeTask(doc.data());
         const projectId = doc.ref.parent.parent?.id || '';
         return { id: doc.id, projectId, ...data };
       });
@@ -3001,6 +3229,7 @@ const MyTasksView = () => {
     });
 
     return () => {
+      usersUnsub();
       projectsUnsub();
       unsubscribe();
     };
@@ -3058,6 +3287,7 @@ const MyTasksView = () => {
 
       try {
         await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), updates);
+        void syncTicketFromTask(task.projectId, task.id);
         
         // Send notifications for status change
         const projectManagers = projects.find(p => p.id === task.projectId)?.managers || [];
@@ -3167,23 +3397,18 @@ const MyTasksView = () => {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {sortedTasks.length === 0 ? (
-            <div className="col-span-full p-12 text-center bg-white rounded-2xl border border-dashed border-slate-200">
-              <CheckCircle2 className="mx-auto text-slate-200 mb-4" size={48} />
-              <p className="text-slate-500 font-medium">Không tìm thấy công việc nào phù hợp.</p>
-            </div>
-          ) : (
-            sortedTasks.map(task => (
-              <TaskCard 
-                key={task.id} 
-                task={task} 
-                projectManagers={projects.find(p => p.id === task.projectId)?.managers || []}
-                onUpdateStatus={updateTaskStatus} 
-              />
-            ))
-          )}
-        </div>
+        {/* Dạng BẢNG, giống bảng "Danh sách công việc tổng thể" mà quản lý
+            đang dùng. Cùng một loại dữ liệu thì phải cùng một cách trình bày,
+            bất kể vai trò người xem. */}
+        <Card>
+          <TaskTable
+            tasks={sortedTasks}
+            users={users}
+            projects={projects}
+            onOpen={setEditingTask}
+            emptyText="Không tìm thấy công việc nào phù hợp."
+          />
+        </Card>
       </div>
 
       <AnimatePresence>
@@ -3191,7 +3416,73 @@ const MyTasksView = () => {
           <TaskCreateModal onClose={() => setIsNewTaskModalOpen(false)} />
         )}
       </AnimatePresence>
+      {editingTask && (
+        <TaskEditModal
+          task={editingTask}
+          users={users}
+          projectManagers={projects.find(p => p.id === editingTask.projectId)?.managers || []}
+          onClose={() => setEditingTask(null)}
+        />
+      )}
     </div>
+  );
+};
+
+/**
+ * Ảnh đại diện: dùng ảnh Google nếu có, không thì hai chữ cái đầu.
+ *
+ * Bản cũ luôn render <img src={photoURL}> — tài khoản không có ảnh (mọi tài
+ * khoản tạo trên emulator, và cả tài khoản thật chưa đặt ảnh) cho ra một ô vỡ
+ * hình. Chữ cái thì luôn có, và màu suy từ tên nên cùng một người luôn cùng
+ * một màu, mắt nhận ra dòng của họ mà không phải đọc.
+ */
+const Avatar = ({ name, photoURL }: { name?: string; photoURL?: string }) => {
+  const chu = (name ?? '?')
+    .trim().split(/\s+/).slice(-2).map((w) => w[0] ?? '').join('').toUpperCase() || '?';
+  const mau = ['bg-indigo-100 text-indigo-700', 'bg-sky-100 text-sky-700',
+               'bg-amber-100 text-amber-700', 'bg-emerald-100 text-emerald-700',
+               'bg-rose-100 text-rose-700', 'bg-violet-100 text-violet-700'];
+  let h = 0;
+  for (const c of name ?? '') h = (h * 31 + c.charCodeAt(0)) % 997;
+  if (photoURL) {
+    return <img src={photoURL} alt="" className="h-10 w-10 shrink-0 rounded-full border border-slate-200 object-cover" />;
+  }
+  return (
+    <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold", mau[h % mau.length])}>
+      {chu}
+    </span>
+  );
+};
+
+/** Bỏ dấu tiếng Việt để tìm kiếm khớp cả khi người dùng gõ không dấu. */
+function boDauVN(s: string): string {
+  return s.toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    // đ không phải tổ hợp dấu nên NFD không tách ra được, phải thay tay.
+    .replace(/đ/g, 'd');
+}
+
+/**
+ * Con số "có gì mới" trên một mục điều hướng.
+ *
+ * Vẽ ở ba chỗ: thanh bên máy tính, ngăn kéo điện thoại, thanh dưới điện thoại.
+ * Tách ra component để ba chỗ không bao giờ lệch kiểu — trước đây mỗi chỗ tự vẽ
+ * là ba biến thể khác nhau sau vài tháng.
+ *
+ * 99+ thay vì số thật: quá ba chữ số thì con số không còn là thông tin, nó chỉ
+ * còn là "nhiều", mà lại phá vỡ bề rộng của mục.
+ */
+const NavBadge = ({ count, muted }: { count: number; muted?: boolean }) => {
+  if (!count) return null;
+  return (
+    <span
+      className={cn(
+        "min-w-5 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none text-white text-center",
+        muted ? "bg-slate-400" : "bg-red-500"
+      )}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
   );
 };
 
@@ -3200,6 +3491,11 @@ const TeamView = () => {
   const { showToast } = useToast();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
+  // Quyền trong module hỗ trợ nằm ở collection riêng, không phải users.role.
+  // Nạp ở đây để mỗi dòng hiện được người đó là cán bộ trường nào, hay đang
+  // phụ trách hệ thống.
+  const [scopes, setScopes] = useState<Record<string, SupportRoleAssignment>>({});
+  const [campuses, setCampuses] = useState<Campus[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -3216,9 +3512,17 @@ const TeamView = () => {
       setInvitations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invitation)));
     });
 
+    const scopeUnsub = watchRoleAssignments(
+      (rows) => setScopes(Object.fromEntries(rows.map((r) => [r.uid, r]))),
+      () => setScopes({})
+    );
+    const campusUnsub = watchCampuses(setCampuses, () => setCampuses([]));
+
     return () => {
       unsubscribe();
       inviteUnsub();
+      scopeUnsub();
+      campusUnsub();
     };
   }, []);
 
@@ -3274,25 +3578,93 @@ const TeamView = () => {
     }
   };
 
+  // ---- Lọc, tìm, sắp xếp, phân trang ----
+  //
+  // Bốn tài khoản thì cuộn tay được. 200 tài khoản — quy mô thật của 18 trường
+  // cộng đội PTUD — thì không: admin cần tìm đúng một người để đổi trường cho
+  // họ, và cuộn qua 200 dòng là cách chắc chắn nhất để đổi nhầm người.
+  const [q, setQ] = useState('');
+  const [fRole, setFRole] = useState('all');
+  const [fScope, setFScope] = useState('all');
+  const [fStatus, setFStatus] = useState('all');
+  const [sortAsc, setSortAsc] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [rowMenu, setRowMenu] = useState<string | null>(null);
+
+  /** Nhóm loại thành viên của một người, dùng cho ô lọc. */
+  const scopeGroup = (uid: string): string => {
+    const r = scopes[uid]?.supportRole;
+    if (!r) return 'none';
+    if (r === 'CAMPUS_REPORTER' || r === 'CAMPUS_FOCAL') return 'campus';
+    if (r === 'MODULE_OWNER' || r === 'PTUD_MANAGER') return 'owner';
+    if (r === 'DEVELOPER') return 'staff';
+    return 'admin';
+  };
+
+  const shown = useMemo(() => {
+    const needle = boDauVN(q.trim());
+    let list = users.filter((u) => {
+      if (fRole !== 'all' && u.role !== fRole) return false;
+      if (fStatus !== 'all' && u.status !== fStatus) return false;
+      if (fScope !== 'all' && scopeGroup(u.uid) !== fScope) return false;
+      if (!needle) return true;
+      const campus = scopes[u.uid]?.campusId ?? '';
+      return boDauVN(`${u.displayName} ${u.email} ${u.role} ${campus}`).includes(needle);
+    });
+    list = [...list].sort((a, b) =>
+      (a.displayName ?? '').localeCompare(b.displayName ?? '', 'vi') * (sortAsc ? 1 : -1)
+    );
+    return list;
+  }, [users, scopes, q, fRole, fScope, fStatus, sortAsc]);
+
+  // Đổi bộ lọc mà vẫn đứng ở trang 3 thì bảng trống trơn.
+  useEffect(() => { setPage(1); }, [q, fRole, fScope, fStatus, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(shown.length / pageSize));
+  const pageSafe = Math.min(page, totalPages);
+  const from = (pageSafe - 1) * pageSize;
+  const rows = shown.slice(from, from + pageSize);
+
+  const selectCls =
+    "rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none";
+
   if (loading) return <div className="p-8 text-center"><Loader2 className="animate-spin mx-auto mb-2" /> Đang tải danh sách...</div>;
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
-      <ConfirmationModal 
+    <div className="p-6 lg:p-8 max-w-7xl mx-auto">
+      <ConfirmationModal
         isOpen={confirmModal.isOpen}
         onClose={() => setConfirmModal({ isOpen: false, userId: '' })}
         onConfirm={() => deleteUser(confirmModal.userId)}
         title="Xóa người dùng"
         message="Bạn có chắc chắn muốn xóa người dùng này? Thao tác này không thể hoàn tác và sẽ xóa toàn bộ dữ liệu hồ sơ của họ."
       />
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Quản lý thành viên</h1>
-          <p className="text-slate-500">Phân quyền và quản lý tài khoản người dùng trong hệ thống.</p>
+
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+            <Users size={22} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Quản lý thành viên</h1>
+            <p className="text-sm text-slate-500">Phân quyền và quản lý tài khoản người dùng trong hệ thống.</p>
+          </div>
         </div>
-        <Button onClick={() => setShowInviteModal(true)} className="bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100">
-          <Plus size={18} className="mr-2" /> Mời thành viên
+        <Button onClick={() => setShowInviteModal(true)} className="shadow-lg shadow-indigo-100">
+          <Plus size={18} /> Mời thành viên
         </Button>
+      </div>
+
+      {/* Hai cột quyền, hai module khác nhau. Không nói rõ ở đây thì admin đổi
+          nhầm cột và không hiểu vì sao người kia vẫn không vào được. */}
+      <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+        <Info size={16} className="mt-0.5 shrink-0 text-indigo-500" />
+        <p className="text-xs leading-relaxed text-slate-600">
+          <span className="font-semibold text-slate-800">Vai trò</span> quyết định quyền trong module Công việc.{' '}
+          <span className="font-semibold text-slate-800">Loại thành viên</span> quyết định quyền trong module Hỗ trợ
+          — cán bộ nhà trường phải chọn trường thì mới gửi được yêu cầu.
+        </p>
       </div>
 
       {showInviteModal && (
@@ -3342,7 +3714,6 @@ const TeamView = () => {
           </motion.div>
         </div>
       )}
-
       {invitations.length > 0 && (
         <div className="mb-8">
           <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
@@ -3375,72 +3746,233 @@ const TeamView = () => {
       )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <table className="w-full text-left">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3">
+          <div className="relative min-w-56 flex-1">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Tìm kiếm theo tên, email, vai trò..."
+              className="w-full rounded-xl border border-slate-200 py-2.5 pl-9 pr-3 text-sm focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
+          <select value={fRole} onChange={(e) => setFRole(e.target.value)} className={selectCls}>
+            <option value="all">Vai trò: Tất cả</option>
+            <option value="user">Vai trò: User</option>
+            <option value="manager">Vai trò: Manager</option>
+            <option value="director">Vai trò: Director</option>
+            <option value="admin">Vai trò: Admin</option>
+          </select>
+          <select value={fScope} onChange={(e) => setFScope(e.target.value)} className={selectCls}>
+            <option value="all">Loại thành viên: Tất cả</option>
+            <option value="campus">Cán bộ nhà trường</option>
+            <option value="owner">Cán bộ phụ trách</option>
+            <option value="staff">Nhân viên dự án</option>
+            <option value="admin">Quản trị hệ thống</option>
+            <option value="none">Chưa gán</option>
+          </select>
+          <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className={selectCls}>
+            <option value="all">Trạng thái: Tất cả</option>
+            <option value="active">Đang hoạt động</option>
+            <option value="pending">Chờ duyệt</option>
+            <option value="disabled">Vô hiệu</option>
+          </select>
+          <button
+            onClick={() => { setQ(''); setFRole('all'); setFScope('all'); setFStatus('all'); }}
+            title="Xoá hết bộ lọc"
+            className="rounded-xl border border-slate-200 p-2.5 text-slate-500 transition-colors hover:bg-slate-50"
+          >
+            <RefreshCw size={16} />
+          </button>
+        </div>
+
+        {rows.length === 0 ? (
+          <StateBlock
+            kind="empty"
+            title="Không tìm thấy thành viên nào"
+            description="Thử xoá bớt bộ lọc hoặc dùng từ khoá ngắn hơn."
+          />
+        ) : (
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[1000px] text-left">
           <thead className="bg-slate-50 border-b border-slate-100">
             <tr>
-              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase">Thành viên</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase">
+                <button
+                  onClick={() => setSortAsc((v) => !v)}
+                  className="inline-flex items-center gap-1 hover:text-slate-600"
+                  title="Đổi thứ tự sắp xếp"
+                >
+                  Thành viên <ArrowUpDown size={12} />
+                </button>
+              </th>
               <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase">Email</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase">Vai trò</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase">Loại thành viên</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase">Trạng thái</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase">Hành động</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {users.map(user => (
+            {rows.map(user => {
+              const asg = scopes[user.uid] ?? null;
+              const campus = asg?.campusId ? campuses.find(c => c.id === asg.campusId) : null;
+              // Dòng phụ dưới tên: trường nếu là cán bộ nhà trường, còn lại là
+              // tên ngắn của loại. Nó trả lời "người này là ai" nhanh hơn đọc
+              // ngang sang hai cột khác.
+              const phu = campus?.code
+                ?? (scopeGroup(user.uid) === 'owner' ? 'Cán bộ phụ trách'
+                  : scopeGroup(user.uid) === 'staff' ? 'NV dự án'
+                  : scopeGroup(user.uid) === 'admin' ? 'Admin tổng' : '');
+              return (
               <tr key={user.uid} className="hover:bg-slate-50 transition-colors">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
-                    <img src={user.photoURL} alt="" className="w-8 h-8 rounded-full border border-slate-200" />
-                    <span className="font-medium text-slate-900">{user.displayName}</span>
+                    <Avatar name={user.displayName} photoURL={user.photoURL} />
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900 truncate">{user.displayName}</p>
+                      {phu && <p className="text-xs text-slate-500">({phu})</p>}
+                      {/* UID chứ không phải mã nhân sự — hệ thống chưa có mã
+                          nhân sự. Ghi đúng tên để không ai hiểu nhầm. */}
+                      <p className="mt-0.5 font-mono text-[10px] text-slate-300">
+                        UID: {user.uid.slice(0, 10)}
+                      </p>
+                    </div>
                   </div>
                 </td>
-                <td className="px-6 py-4 text-sm text-slate-500">{user.email}</td>
                 <td className="px-6 py-4">
-                  <Badge variant={user.role === 'admin' ? 'danger' : user.role === 'director' ? 'warning' : user.role === 'manager' ? 'info' : 'neutral'}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm text-slate-500">{user.email}</span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard?.writeText(user.email);
+                        showToast('Đã sao chép email');
+                      }}
+                      title="Sao chép email"
+                      className="rounded p-1 text-slate-300 transition-colors hover:bg-slate-100 hover:text-slate-500"
+                    >
+                      <Copy size={13} />
+                    </button>
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                  <Badge variant={user.role === 'admin' ? 'danger' : user.role === 'director' ? 'warning' : user.role === 'manager' ? 'info' : 'primary'}>
                     {user.role.toUpperCase()}
                   </Badge>
                 </td>
+                {/* Loại thành viên trong module hỗ trợ — khác với cột Vai trò
+                    bên trái, vốn là quyền của module Công việc. */}
                 <td className="px-6 py-4">
-                  <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", user.status === 'active' ? "text-emerald-600" : "text-slate-400")}>
-                    <span className={cn("w-1.5 h-1.5 rounded-full", user.status === 'active' ? "bg-emerald-500" : "bg-slate-300")} />
-                    {user.status === 'active' ? 'Hoạt động' : 'Vô hiệu'}
+                  <MemberScopeCell
+                    uid={user.uid}
+                    userStatus={user.status}
+                    assignment={asg}
+                    campuses={campuses}
+                    actorUid={profile?.uid ?? ''}
+                    onToast={showToast}
+                  />
+                </td>
+                <td className="px-6 py-4">
+                  <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium",
+                    user.status === 'active' ? "text-emerald-600"
+                    : user.status === 'pending' ? "text-amber-600" : "text-slate-400")}>
+                    <span className={cn("w-1.5 h-1.5 rounded-full",
+                      user.status === 'active' ? "bg-emerald-500"
+                      : user.status === 'pending' ? "bg-amber-500" : "bg-slate-300")} />
+                    {user.status === 'active' ? 'Hoạt động' : user.status === 'pending' ? 'Chờ duyệt' : 'Vô hiệu'}
                   </span>
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                    <select 
+                    <select
                       value={user.role}
                       onChange={(e) => updateRole(user.uid, e.target.value as UserRole)}
-                      className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                      className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 focus:border-indigo-500 focus:outline-none"
                     >
                       <option value="user">User</option>
                       <option value="manager">Manager</option>
                       <option value="director">Director</option>
                       <option value="admin">Admin</option>
                     </select>
-                    <button 
-                      onClick={() => updateUserStatus(user.uid, user.status === 'active' ? 'disabled' : 'active')}
-                      className={cn(
-                        "p-1.5 rounded-lg transition-colors",
-                        user.status === 'active' ? "text-amber-600 hover:bg-amber-50" : "text-emerald-600 hover:bg-emerald-50"
+
+                    {/* Vô hiệu hoá và xoá nằm trong menu, không phơi thành hai
+                        nút cạnh ô chọn vai trò: chúng là thao tác hiếm và nguy
+                        hiểm, đứng cạnh một thao tác hằng ngày là mời bấm nhầm. */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setRowMenu(rowMenu === user.uid ? null : user.uid)}
+                        aria-label={`Thao tác với ${user.displayName}`}
+                        className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                      {rowMenu === user.uid && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setRowMenu(null)} />
+                          <div className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                            <button
+                              onClick={() => {
+                                updateUserStatus(user.uid, user.status === 'active' ? 'disabled' : 'active');
+                                setRowMenu(null);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                            >
+                              {user.status === 'active'
+                                ? <><XCircle size={14} className="text-amber-500" /> Vô hiệu hoá tài khoản</>
+                                : <><CheckCircle2 size={14} className="text-emerald-500" /> Kích hoạt tài khoản</>}
+                            </button>
+                            <div className="my-1 border-t border-slate-100" />
+                            <button
+                              onClick={() => { setConfirmModal({ isOpen: true, userId: user.uid }); setRowMenu(null); }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 size={14} /> Xoá người dùng
+                            </button>
+                          </div>
+                        </>
                       )}
-                      title={user.status === 'active' ? "Vô hiệu hóa" : "Kích hoạt"}
-                    >
-                      {user.status === 'active' ? <XCircle size={16} /> : <CheckCircle2 size={16} />}
-                    </button>
-                    <button 
-                      onClick={() => setConfirmModal({ isOpen: true, userId: user.uid })}
-                      className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Xóa người dùng"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    </div>
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
+        </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+          <p className="text-xs text-slate-500">
+            Hiển thị {shown.length === 0 ? 0 : from + 1} – {Math.min(from + pageSize, shown.length)} trong {shown.length} thành viên
+          </p>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={pageSafe === 1}
+              aria-label="Trang trước"
+              className="rounded-lg border border-slate-200 p-1.5 text-slate-500 disabled:opacity-40">
+              <ChevronLeft size={16} />
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map(n => (
+              <button key={n} onClick={() => setPage(n)}
+                className={cn("min-w-8 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors",
+                  n === pageSafe ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100")}>
+                {n}
+              </button>
+            ))}
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={pageSafe === totalPages}
+              aria-label="Trang sau"
+              className="rounded-lg border border-slate-200 p-1.5 text-slate-500 disabled:opacity-40">
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-slate-500">
+            Hiển thị
+            <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}
+              className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700 focus:border-indigo-500 focus:outline-none">
+              {[10, 20, 50].map(n => <option key={n} value={n}>{n} / trang</option>)}
+            </select>
+          </label>
+        </div>
       </div>
     </div>
   );
@@ -3454,7 +3986,7 @@ const ReportsView = () => {
     // Real-time stats using collectionGroup
     const q = query(collectionGroup(db, 'tasks'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const allTasks = snapshot.docs.map(doc => doc.data() as Task);
+      const allTasks = snapshot.docs.map(doc => normalizeTask(doc.data()));
       
       const statusCounts = allTasks.reduce((acc: any, task: any) => {
         acc[task.status] = (acc[task.status] || 0) + 1;
@@ -3976,7 +4508,7 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
 
     const q = query(collection(db, `projects/${projectId}/tasks`), orderBy('createdAt', 'desc'));
     const unsubTasks = onSnapshot(q, (snapshot) => {
-      setTasks(snapshot.docs.map(doc => ({ id: doc.id, projectId, ...doc.data() } as Task)));
+      setTasks(snapshot.docs.map(doc => normalizeTask({ id: doc.id, projectId, ...doc.data() })));
     }, (error) => handleFirestoreError(error, OperationType.LIST, `projects/${projectId}/tasks`));
 
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
@@ -4028,6 +4560,9 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
 
     try {
       await updateDoc(doc(db, `projects/${projectId}/tasks`, task.id), updates);
+      // Phiếu hỗ trợ chạy theo công việc: tiến độ >0 = đang xử lý, 100% =
+      // đã khắc phục, nghiệm thu xong = hoàn tất. Best-effort, không chặn.
+      void syncTicketFromTask(projectId, task.id);
       
       // Send notifications for status change
       const targets = [...new Set([...task.assignees, ...(task.reviewers || []), ...(task.cc || []), ...(project?.managers || [])])].filter(id => id !== profile?.uid);
@@ -4581,10 +5116,63 @@ function AuthConsumer({
   const { user, profile, loading, error, signIn, logout } = useAuth();
   const { showToast } = useToast();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // Vai trò hỗ trợ nằm ở collection riêng nên phải đọc bất đồng bộ.
+  // Nó quyết định thanh điều hướng hiện những mục nào.
+  const supportRole = useSupportRole(profile?.uid);
+  // Số "có gì mới" trên từng mục điều hướng, đếm từ thông báo chưa đọc.
+  const navBadges = useNavBadges(profile?.uid);
+  /** Công việc cần mở ngay sau khi chuyển sang mục Công việc. */
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+
+  // Bấm "Mở công việc" ở phiếu hỗ trợ: chuyển sang mục Công việc rồi mở đúng
+  // task đó. Dùng sự kiện window thay vì đổi URL: không tải lại trang nên
+  // không mất thứ người dùng đang gõ dở ở màn khác.
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent).detail ?? {};
+      if (!d.taskId) return;
+      setActiveNav('tasks');
+      setCurrentProjectId(null);
+      setOpenTaskId(String(d.taskId));
+    };
+    window.addEventListener('fsc:open-task', h);
+    return () => window.removeEventListener('fsc:open-task', h);
+  }, [setActiveNav, setCurrentProjectId]);
+
+  // Chiều ngược lại: từ công việc quay về phiếu hỗ trợ gốc.
+  useEffect(() => {
+    const h = (e: Event) => {
+      const no = String((e as CustomEvent).detail ?? '');
+      if (!no) return;
+      setActiveNav('support');
+      setCurrentProjectId(null);
+      // Đợi màn Hỗ trợ dựng xong rồi mới bảo nó mở phiếu.
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('fsc:open-ticket', { detail: no }));
+      }, 0);
+    };
+    window.addEventListener('fsc:goto-support', h);
+    return () => window.removeEventListener('fsc:goto-support', h);
+  }, [setActiveNav, setCurrentProjectId]);
 
   useEffect(() => {
     // No redirect for users, let them see the overview dashboard if they want
   }, [profile, activeNav, setActiveNav]);
+
+  // Đang mở mục nào thì thông báo của mục đó coi như đã xem.
+  //
+  // CHỈ áp dụng cho người có nhiều mục để chọn. Cán bộ trường bị đẩy THẲNG vào
+  // mục Hỗ trợ ngay khi đăng nhập, không hề bấm gì — với họ điều kiện "đang mở
+  // mục Hỗ trợ" luôn đúng, nên quy tắc này xoá sạch thông báo của họ ngay lập
+  // tức và cái chuông không bao giờ hiện số. Họ đánh dấu đã đọc bằng cách bấm
+  // vào từng thông báo trong chuông, hoặc bấm "Đánh dấu tất cả đã đọc".
+  //
+  // Phải nằm TRÊN mọi return sớm bên dưới — hook không được gọi có điều kiện.
+  const navDangMo = supportRole.isCampusSide ? null : activeNav;
+  useEffect(() => {
+    if (navDangMo === 'support' && navBadges.support > 0) void navBadges.markSeen('support');
+    if (navDangMo === 'tasks' && navBadges.tasks > 0) void navBadges.markSeen('tasks');
+  }, [navDangMo, navBadges]);
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center h-screen bg-slate-50">
@@ -4669,26 +5257,48 @@ function AuthConsumer({
     );
   }
 
-  if (profile?.status === 'disabled') {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-slate-50">
-        <XCircle size={48} className="text-red-500 mb-4" />
-        <h2 className="text-xl font-bold text-slate-900 mb-2">Tài khoản đã bị vô hiệu hóa</h2>
-        <p className="text-slate-500 mb-6 text-center max-w-xs">Tài khoản của bạn đã bị quản trị viên vô hiệu hóa. Vui lòng liên hệ quản trị viên để biết thêm chi tiết.</p>
-        <Button onClick={logout} className="bg-red-600 hover:bg-red-700">
-          <LogOut size={18} className="mr-2" /> Đăng xuất
-        </Button>
-      </div>
-    );
+  // Cổng duyệt tài khoản.
+  // 'pending' = mới đăng nhập lần đầu, chờ admin duyệt và gán trường.
+  // 'disabled' = đã bị từ chối hoặc vô hiệu hoá.
+  // Cả hai đều KHÔNG được vào ứng dụng. firestore.rules mới là chỗ chặn thật;
+  // màn này chỉ để người dùng hiểu chuyện gì đang xảy ra thay vì thấy toàn màn trống.
+  if (profile && (profile.status === 'pending' || profile.status === 'disabled')) {
+    return <PendingGate profile={profile} onSignOut={logout} />;
   }
 
-  const navItems = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'Tổng quan' },
-    { id: 'projects', icon: Briefcase, label: 'Dự án', roles: ['admin', 'director', 'manager'] },
-    { id: 'tasks', icon: CheckSquare, label: 'Công việc' },
-    { id: 'reports', icon: BarChart3, label: 'Báo cáo', roles: ['admin', 'director'] },
-    { id: 'team', icon: Users, label: 'Thành viên', roles: ['admin'] },
-  ].filter(item => !item.roles || item.roles.includes(profile?.role || ''));
+  // Chờ biết vai trò hỗ trợ rồi mới dựng menu. Không chờ thì menu hiện đủ mục
+  // rồi đột ngột mất bớt khi dữ liệu về — nhấp nháy và gây hiểu nhầm về quyền.
+  if (supportRole.loading) return (
+    <div className="flex h-screen items-center justify-center bg-slate-50">
+      <Loader2 size={28} className="animate-spin text-indigo-500" />
+    </div>
+  );
+
+  // Cán bộ trường CHỈ thấy module hỗ trợ.
+  //
+  // Họ không tham gia vận hành task: không có dự án nào của họ, không có công
+  // việc nào giao cho họ, và bảng tổng quan là số liệu nội bộ đội PTUD. Hiện
+  // những mục đó ra chỉ tạo ra màn hình trống và câu hỏi "sao tôi không thấy gì".
+  // Việc làm task thuộc về cán bộ phụ trách từng hệ thống.
+  const navItems = supportRole.isCampusSide
+    ? [{ id: 'support', icon: LifeBuoy, label: 'Yêu cầu hỗ trợ' }]
+    : [
+        { id: 'dashboard', icon: LayoutDashboard, label: 'Tổng quan' },
+        { id: 'projects', icon: Briefcase, label: 'Dự án', roles: ['admin', 'director', 'manager'] },
+        { id: 'tasks', icon: CheckSquare, label: 'Công việc' },
+        { id: 'reports', icon: BarChart3, label: 'Báo cáo', roles: ['admin', 'director'] },
+        { id: 'team', icon: Users, label: 'Thành viên', roles: ['admin'] },
+        { id: 'support', icon: LifeBuoy, label: 'Hỗ trợ' },
+      ].filter(item => !item.roles || item.roles.includes(profile?.role || ''));
+
+  // Cán bộ trường vào thẳng màn hỗ trợ. Không ép thì họ rơi vào 'dashboard' —
+  // một mục không còn trong menu của họ, và màn hình sẽ trống trơn.
+  const effectiveNav = supportRole.isCampusSide ? 'support' : activeNav;
+
+
+  const badgeOf = (id: string) =>
+    id === 'support' ? navBadges.support : id === 'tasks' ? navBadges.tasks : 0;
+
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -4733,11 +5343,12 @@ function AuthConsumer({
                       }}
                       className={cn(
                         "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all",
-                        activeNav === item.id && !currentProjectId ? "bg-indigo-50 text-indigo-600" : "text-slate-500 hover:bg-slate-50"
+                        effectiveNav === item.id && !currentProjectId ? "bg-indigo-50 text-indigo-600" : "text-slate-500 hover:bg-slate-50"
                       )}
                     >
                       <item.icon size={18} />
-                      {item.label}
+                      <span className="flex-1 text-left">{item.label}</span>
+                      <NavBadge count={badgeOf(item.id)} muted={effectiveNav === item.id} />
                     </button>
                   ))}
                 </nav>
@@ -4779,11 +5390,12 @@ function AuthConsumer({
                 }}
                 className={cn(
                   "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all",
-                  activeNav === item.id && !currentProjectId ? "bg-indigo-50 text-indigo-600" : "text-slate-500 hover:bg-slate-50"
+                  effectiveNav === item.id && !currentProjectId ? "bg-indigo-50 text-indigo-600" : "text-slate-500 hover:bg-slate-50"
                 )}
               >
                 <item.icon size={18} />
-                {item.label}
+                <span className="flex-1 text-left">{item.label}</span>
+                <NavBadge count={badgeOf(item.id)} muted={effectiveNav === item.id} />
               </button>
             ))}
           </nav>
@@ -4847,18 +5459,42 @@ function AuthConsumer({
             </div>
           ) : (
             <div className="p-4 lg:p-8 max-w-7xl mx-auto">
-              {activeNav === 'dashboard' && <Dashboard onSelectProject={setCurrentProjectId} />}
-              {activeNav === 'projects' && <Dashboard onSelectProject={setCurrentProjectId} />}
-              {activeNav === 'tasks' && <MyTasksView />}
-              {activeNav === 'reports' && <ReportsView />}
-              {activeNav === 'team' && <TeamView />}
+              {effectiveNav === 'dashboard' && <Dashboard onSelectProject={setCurrentProjectId} />}
+              {effectiveNav === 'projects' && <Dashboard onSelectProject={setCurrentProjectId} />}
+              {effectiveNav === 'tasks' && (
+                <MyTasksView openTaskId={openTaskId} onOpened={() => setOpenTaskId(null)} />
+              )}
+              {effectiveNav === 'reports' && <ReportsView />}
+              {effectiveNav === 'team' && <TeamView />}
+              {/* Admin thấy màn quản trị (duyệt tài khoản, quản lý trường).
+                  Mọi người khác thấy màn của trường mình: danh sách phiếu, gửi
+                  phiếu mới, và đích đến của deep link ?ticket=. */}
+              {effectiveNav === 'support' && profile && (
+                profile.role === 'admin' ? (
+                  <SupportAdminView actorUid={profile.uid} onToast={showToast} />
+                ) : supportRole.isPtudSide ? (
+                  // Cán bộ PTUD: hàng đợi tiếp nhận, không phải màn gửi phiếu.
+                  <PtudSupportView actorUid={profile.uid} onToast={showToast} />
+                ) : (
+                  <SupportView
+                    userId={profile.uid}
+                    userName={profile.displayName}
+                    userEmail={profile.email}
+                    onToast={showToast}
+                  />
+                )
+              )}
             </div>
           )}
         </div>
 
         {/* Mobile Bottom Nav */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 py-2 flex items-center justify-around lg:hidden z-40">
-          {navItems.slice(0, 4).map((item) => (
+        {/* Trước đây render navItems.slice(0, 4): với admin (6 mục) và director
+            (5 mục) thì mục cuối bị CẮT KHỎI nav mobile mà không có dấu hiệu gì —
+            người dùng không có cách nào biết là còn mục nữa. Đổi sang cuộn ngang
+            để không mục nào bị giấu, bất kể sau này thêm bao nhiêu mục. */}
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-2 py-2 flex items-center gap-1 overflow-x-auto lg:hidden z-40">
+          {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => {
@@ -4866,11 +5502,18 @@ function AuthConsumer({
                 setCurrentProjectId(null);
               }}
               className={cn(
-                "flex flex-col items-center gap-1 p-2 rounded-lg transition-colors",
-                activeNav === item.id && !currentProjectId ? "text-indigo-600" : "text-slate-400"
+                "relative flex shrink-0 flex-col items-center gap-1 px-3 py-2 rounded-lg transition-colors",
+                effectiveNav === item.id && !currentProjectId ? "text-indigo-600" : "text-slate-400"
               )}
             >
               <item.icon size={20} />
+              {/* Trên thanh dưới không có chỗ cho badge đứng cạnh chữ, nên nó
+                  nổi lên góc icon như huy hiệu ứng dụng trên điện thoại. */}
+              {badgeOf(item.id) > 0 && (
+                <span className="absolute right-1 top-1 min-w-4 rounded-full bg-red-500 px-1 py-0.5 text-[9px] font-bold leading-none text-white">
+                  {badgeOf(item.id) > 99 ? '99+' : badgeOf(item.id)}
+                </span>
+              )}
               <span className="text-[10px] font-medium">{item.label}</span>
             </button>
           ))}

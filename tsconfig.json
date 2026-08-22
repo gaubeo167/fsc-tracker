@@ -18,9 +18,23 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@support/*": [
+        "./src/modules/support/*"
       ]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": [
+    "src",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "api",
+    "scripts"
+  ]
 }
