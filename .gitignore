@@ -6,3 +6,23 @@ coverage/
 *.log
 .env*
 !.env.example
+# Không có secret, cả team dùng chung để chạy môi trường test
+!.env.emulator
+
+# Credential Firebase Admin — tên file mặc định khi tải từ GCP console.
+# Commit nhầm một trong mấy file này là lộ quyền đọc/ghi/xoá toàn bộ database.
+service-account.json
+*serviceAccount*.json
+*service-account*.json
+*-adminsdk-*.json
+*.pem
+
+# Firebase CLI / emulator
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+storage-debug.log
+*-debug.log
+emulator-data/
+.vercel

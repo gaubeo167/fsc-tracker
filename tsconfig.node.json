@@ -1,0 +1,44 @@
+{
+  "//": [
+    "Config riêng cho code chạy trên Node: scripts/ và (sau này) api/.",
+    "",
+    "Vì sao phải tách khỏi tsconfig.json: config chính khai lib DOM và không có",
+    "types node, đúng cho code trình duyệt. Ném firebase-admin và process.env vào",
+    "đó là sai môi trường.",
+    "",
+    "include liệt kê TỪNG FILE chứ không quét cả thư mục services: trong đó có",
+    "attachmentUpload.ts là code trình duyệt thuần (document, createImageBitmap,",
+    "import.meta.env) và nó sẽ fail dưới lib ES2022 không DOM. Chỉ nạp đúng phần",
+    "logic thuần mà scripts thật sự import."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ],
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "scripts",
+    "src/modules/support/types.ts",
+    "src/modules/support/services/workingTime.ts",
+    "src/modules/support/services/slaCalculator.ts",
+    "src/modules/support/services/textNormalize.ts",
+    "src/modules/support/services/duplicateScorer.ts",
+    "src/modules/support/services/ticketNumber.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
