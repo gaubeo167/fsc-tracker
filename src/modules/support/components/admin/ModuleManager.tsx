@@ -1,6 +1,6 @@
 import { AlertTriangle, FolderGit2, Layers, Pencil, Plus, Power, PowerOff, Save, X } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
-import { collection, doc, getDocs, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, setDoc } from 'firebase/firestore';
 import { db } from '../../../../firebase';
 import { Badge, Button, Card, StateBlock, cn } from '../../../../components/ui';
 import { ICON } from '../../ui/tokens';
@@ -119,10 +119,19 @@ export function ModuleManager({ onToast }: { onToast: Toast }) {
     setBusy(code);
     try {
       const patch = drafts[code] ?? {};
-      await updateDoc(doc(db, COL.modules, code), {
-        ownerUserId: (patch.ownerUserId ?? valueOf(code, 'ownerUserId')) || null,
-        backupOwnerUserId: (patch.backupOwnerUserId ?? valueOf(code, 'backupOwnerUserId')) || null,
-      });
+      // setDoc(merge): phân hệ mặc định có thể chưa có document nào trong
+      // Firestore, gán đầu mối chính là lúc tạo ra nó.
+      await setDoc(
+        doc(db, COL.modules, code),
+        {
+          code,
+          name: modules?.find((m) => m.code === code)?.name ?? code,
+          isActive: modules?.find((m) => m.code === code)?.isActive ?? true,
+          ownerUserId: (patch.ownerUserId ?? valueOf(code, 'ownerUserId')) || null,
+          backupOwnerUserId: (patch.backupOwnerUserId ?? valueOf(code, 'backupOwnerUserId')) || null,
+        },
+        { merge: true }
+      );
       onToast(`Đã lưu cấu hình ${code}`, 'success');
       setDrafts((d) => ({ ...d, [code]: {} }));
       await reload();

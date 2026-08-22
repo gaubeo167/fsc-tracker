@@ -6,7 +6,7 @@ import { Badge, Button, Card, StateBlock, cn } from '../../../../components/ui';
 import { ICON } from '../../ui/tokens';
 import { vi } from '../../i18n/vi';
 import { fetchPtudStaff, fetchSupportModules } from '../../repository/userAdminRepository';
-import { COL, type SupportModuleCode, type SupportModuleConfig } from '../../types';
+import { COL, SUPPORT_MODULES, type SupportModuleCode, type SupportModuleConfig } from '../../types';
 import { useSupportModules } from '../../hooks/useSupportModules';
 
 // ===========================================================================
@@ -180,15 +180,32 @@ export function ProjectManager({ actorUid, onToast }: { actorUid: string; onToas
     if (name) patch.name = name;
     await updateDoc(doc(db, 'projects', projectId), patch);
 
-    // Gán phân hệ về dự án này.
+    // setDoc(merge) chứ KHÔNG phải updateDoc.
+    //
+    // updateDoc ném not-found khi document chưa tồn tại. Năm phân hệ mặc định
+    // hiện ra trong giao diện là do hook rơi về danh sách trong code khi
+    // collection còn rỗng — nên admin chọn được một phân hệ chưa từng có
+    // document, bấm Lưu, và nhận "Không lưu được (not-found)" mà không hiểu vì
+    // sao khi phân hệ đó đang hiện rành rành trước mắt.
+    //
+    // Gán phân hệ vào dự án chính là lúc hợp lý để tạo cấu hình của nó.
     for (const code of moduleCodes) {
-      await updateDoc(doc(db, COL.modules, code), { projectId });
+      await setDoc(
+        doc(db, COL.modules, code),
+        {
+          code,
+          name: SUPPORT_MODULES.find((m) => m.code === code)?.name ?? code,
+          projectId,
+          isActive: true,
+        },
+        { merge: true }
+      );
     }
     // Gỡ những phân hệ trước đây thuộc dự án này mà giờ bỏ chọn — nếu không
     // chúng vẫn trỏ về đây và phiếu tiếp tục chảy vào dự án đã bỏ nhận.
     for (const m of modules) {
       if (m.projectId === projectId && !moduleCodes.includes(m.code)) {
-        await updateDoc(doc(db, COL.modules, m.code), { projectId: null });
+        await setDoc(doc(db, COL.modules, m.code), { projectId: null }, { merge: true });
       }
     }
   }

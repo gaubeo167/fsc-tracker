@@ -267,7 +267,8 @@ export async function createSupportModule(input: {
 export async function renameSupportModule(code: string, name: string): Promise<void> {
   const clean = name.trim();
   if (!clean) throw new DomainError('MODULE_NAME_REQUIRED', 'Chưa nhập tên phân hệ');
-  await updateDoc(doc(db, COL.modules, code), { name: clean });
+  // merge: phân hệ mặc định có thể chưa có document, đổi tên là lúc tạo nó.
+  await setDoc(doc(db, COL.modules, code), { code, name: clean }, { merge: true });
 }
 
 /**
@@ -277,7 +278,7 @@ export async function renameSupportModule(code: string, name: string): Promise<v
  * chiếu mồ côi và mã phiếu FSC-{MA}-... không tra ngược được nữa.
  */
 export async function setSupportModuleActive(code: string, isActive: boolean): Promise<void> {
-  await updateDoc(doc(db, COL.modules, code), { isActive });
+  await setDoc(doc(db, COL.modules, code), { code, isActive }, { merge: true });
 }
 
 /** Cấu hình các phân hệ, gồm ánh xạ tới dự án. */
