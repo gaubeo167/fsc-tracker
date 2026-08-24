@@ -130,11 +130,16 @@ import { SupportView } from './modules/support/components/SupportView';
 import { PtudSupportView } from './modules/support/components/PtudSupportView';
 import { useSupportRole } from './modules/support/hooks/useSupportRole';
 import { useNavBadges } from './modules/support/hooks/useNavBadges';
+import { finishInvitation, readUsableInvitation } from './modules/support/repository/invitationRepository';
+
 import { syncTicketFromTask } from './modules/support/repository/ticketRepository';
 import { MemberScopeCell } from './modules/support/components/admin/MemberScopeCell';
 import { watchRoleAssignments } from './modules/support/repository/userAdminRepository';
 import { watchCampuses } from './modules/support/repository/campusRepository';
-import type { Campus, SupportRoleAssignment } from './modules/support/types';
+import { DomainError, ROLES_REQUIRING_CAMPUS, type Campus, type SupportRole, type SupportRoleAssignment } from './modules/support/types';
+import {
+  createInvitation, deleteInvitation, watchInvitations, type Invitation as PreAuth,
+} from './modules/support/repository/invitationRepository';
 
 const getProgressColor = (progress: number) => {
   if (progress <= 30) return 'bg-red-500';
@@ -288,8 +293,27 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
           console.log('AuthProvider: Fetching user profile for:', user.uid);
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
-            console.log('AuthProvider: Profile found');
-            setProfile(userDoc.data() as UserProfile);
+            const cu = userDoc.data() as UserProfile;
+            // Người đã thử đăng nhập TRƯỚC khi được cấp quyền: hồ sơ họ đang
+            // 'pending'. Nếu sau đó admin cấp quyền trước cho email này thì lần
+            // đăng nhập tiếp theo phải nhận được, không thì họ kẹt mãi ở màn chờ
+            // và admin tưởng đã xong việc.
+            if (cu.status === 'pending') {
+              const inv = await readUsableInvitation(email);
+              if (inv) {
+                // Thứ tự bắt buộc: hồ sơ TRƯỚC, rồi mới tới bản gán và đóng thư
+                // mời. Rules đòi thư mời còn 'pending' cho cả hai lượt ghi đầu.
+                await updateDoc(doc(db, 'users', user.uid), {
+                  role: inv.role,
+                  status: 'active',
+                });
+                await finishInvitation({ uid: user.uid, email, invitation: inv });
+                setProfile({ ...cu, role: inv.role, status: 'active' });
+                setLoading(false);
+                return;
+              }
+            }
+            setProfile(cu);
           } else {
             console.log('AuthProvider: Creating new profile');
             // Default role is 'user' for everyone except the hardcoded admin
@@ -304,15 +328,21 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
             // Ngoại lệ DUY NHẤT là tài khoản admin gốc: nếu nó cũng phải chờ duyệt
             // thì không còn ai trên đời duyệt được cho nó, hệ thống tự khoá chính mình.
             // firestore.rules cho phép đúng ngoại lệ này qua isAdmin().
+            // Duyệt trước: admin đã ghi sẵn quyền cho email này thì nhận luôn,
+            // khỏi phải chờ ai bấm duyệt.
+            const inv = await readUsableInvitation(email);
+
             const newProfile: UserProfile = {
               uid: user.uid,
               displayName: user.displayName || 'User',
               email: email,
               photoURL: user.photoURL || '',
-              role: defaultRole,
-              status: isBootstrapAdmin ? 'active' : 'pending'
+              role: inv?.role ?? defaultRole,
+              status: (isBootstrapAdmin || inv) ? 'active' : 'pending'
             };
             await setDoc(doc(db, 'users', user.uid), newProfile);
+            // Đóng thư mời SAU khi hồ sơ đã ghi xong, xem ghi chú trong repository.
+            if (inv) await finishInvitation({ uid: user.uid, email, invitation: inv });
             setProfile(newProfile);
           }
         } else {
@@ -3506,7 +3536,7 @@ const TeamView = () => {
   const { profile } = useAuth();
   const { showToast } = useToast();
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [invitations, setInvitations] = useState<Array<PreAuth & { id: string }>>([]);
   // Quyền trong module hỗ trợ nằm ở collection riêng, không phải users.role.
   // Nạp ở đây để mỗi dòng hiện được người đó là cán bộ trường nào, hay đang
   // phụ trách hệ thống.
@@ -3516,6 +3546,11 @@ const TeamView = () => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<UserRole>('user');
+  // Loại thành viên phía Hỗ trợ + trường. Rỗng = không cấp quyền hỗ trợ.
+  const [inviteSupportRole, setInviteSupportRole] = useState<SupportRole | ''>('');
+  const [inviteCampus, setInviteCampus] = useState('');
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
     const q = query(collection(db, 'users'), orderBy('displayName'));
@@ -3524,9 +3559,7 @@ const TeamView = () => {
       setLoading(false);
     });
 
-    const inviteUnsub = onSnapshot(query(collection(db, 'invitations'), orderBy('invitedAt', 'desc')), (snapshot) => {
-      setInvitations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invitation)));
-    });
+    const inviteUnsub = watchInvitations(setInvitations, () => setInvitations([]));
 
     const scopeUnsub = watchRoleAssignments(
       (rows) => setScopes(Object.fromEntries(rows.map((r) => [r.uid, r]))),
@@ -3543,25 +3576,29 @@ const TeamView = () => {
   }, []);
 
   const handleInvite = async () => {
-    if (!inviteEmail) return;
-    if (!inviteEmail.endsWith('@fe.edu.vn') && !inviteEmail.endsWith('@fpt.edu.vn')) {
-      showToast('Chỉ chấp nhận email @fe.edu.vn hoặc @fpt.edu.vn', 'error');
-      return;
-    }
+    setInviteError(null);
+    setInviting(true);
     try {
-      await addDoc(collection(db, 'invitations'), {
+      const email = await createInvitation({
         email: inviteEmail,
         role: inviteRole,
-        invitedBy: profile?.uid,
-        invitedAt: Timestamp.now(),
-        status: 'pending'
+        supportRole: inviteSupportRole,
+        campusId: inviteCampus || null,
+        actorUid: profile?.uid ?? '',
       });
       setShowInviteModal(false);
       setInviteEmail('');
-      showToast('Đã gửi thư mời!');
-    } catch (err) {
-      console.error(err);
-      showToast('Lỗi khi gửi thư mời', 'error');
+      setInviteSupportRole('');
+      setInviteCampus('');
+      // Nói ĐÚNG việc vừa làm. Câu cũ là "Đã gửi thư mời!" trong khi hệ thống
+      // không hề gửi email nào — người bấm tưởng đối phương đã nhận được thư.
+      showToast(`Đã cấp quyền trước cho ${email}. Báo giúp họ đăng nhập để nhận.`);
+    } catch (err: any) {
+      setInviteError(
+        err instanceof DomainError ? err.message : `Không lưu được (${err?.code ?? 'lỗi'})`
+      );
+    } finally {
+      setInviting(false);
     }
   };
 
@@ -3668,7 +3705,7 @@ const TeamView = () => {
           </div>
         </div>
         <Button onClick={() => setShowInviteModal(true)} className="shadow-lg shadow-indigo-100">
-          <Plus size={18} /> Mời thành viên
+          <Plus size={18} /> Cấp quyền trước
         </Button>
       </div>
 
@@ -3685,32 +3722,47 @@ const TeamView = () => {
 
       {showInviteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-          <motion.div 
+          <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-6"
+            className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto"
           >
-            <div className="flex justify-between items-center">
-              <h3 className="text-xl font-bold text-slate-900">Mời thành viên mới</h3>
-              <button onClick={() => setShowInviteModal(false)} className="text-slate-400 hover:text-slate-600">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Cấp quyền trước cho một email</h3>
+                {/* Nói thẳng hệ thống KHÔNG gửi email. Câu cũ là "Mời thành viên
+                    mới" kèm toast "Đã gửi thư mời!" trong khi không có một dòng
+                    mã nào gửi thư — người bấm tưởng đối phương đã nhận được. */}
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Ghi sẵn quyền cho một địa chỉ. Người đó đăng nhập lần đầu là có ngay quyền này,
+                  không phải chờ duyệt. <strong>Hệ thống không gửi email</strong> — anh báo giúp họ
+                  qua Zalo hoặc Teams.
+                </p>
+              </div>
+              <button onClick={() => { setShowInviteModal(false); setInviteError(null); }} className="text-slate-400 hover:text-slate-600">
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1.5">Email FPT Education</label>
-                <input 
-                  type="email" 
+                <input
+                  type="email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="example@fe.edu.vn"
+                  placeholder="nguyenvana@fpt.edu.vn"
+                  autoFocus
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm"
                 />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Phải khớp CHÍNH XÁC email họ dùng để đăng nhập Google.
+                </p>
               </div>
+
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Vai trò mặc định</label>
-                <select 
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">Vai trò (module Công việc)</label>
+                <select
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value as UserRole)}
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm"
@@ -3721,42 +3773,116 @@ const TeamView = () => {
                   <option value="admin">Admin</option>
                 </select>
               </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5">Loại thành viên (module Hỗ trợ)</label>
+                <select
+                  value={inviteSupportRole}
+                  onChange={(e) => {
+                    const v = e.target.value as SupportRole | '';
+                    setInviteSupportRole(v);
+                    if (!v || !ROLES_REQUIRING_CAMPUS.includes(v as SupportRole)) setInviteCampus('');
+                  }}
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-sm"
+                >
+                  <option value="">— Không cấp quyền Hỗ trợ —</option>
+                  <option value="CAMPUS_FOCAL">Cán bộ nhà trường</option>
+                  <option value="MODULE_OWNER">Cán bộ phụ trách</option>
+                  <option value="DEVELOPER">Nhân viên dự án</option>
+                </select>
+              </div>
+
+              {inviteSupportRole && ROLES_REQUIRING_CAMPUS.includes(inviteSupportRole as SupportRole) && (
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1.5">
+                    Trường <span className="text-red-500">*</span>
+                  </label>
+                  {campuses.length === 0 ? (
+                    <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      Chưa có trường nào. Vào <strong>Hỗ trợ → Trường học</strong> thêm trường trước.
+                    </p>
+                  ) : (
+                    <select
+                      value={inviteCampus}
+                      onChange={(e) => setInviteCampus(e.target.value)}
+                      className={cn(
+                        "w-full px-4 py-2.5 rounded-xl border outline-none transition-all text-sm focus:ring-2 focus:ring-indigo-500",
+                        inviteCampus ? "border-slate-200" : "border-red-300 bg-red-50"
+                      )}
+                    >
+                      <option value="">— Chọn trường —</option>
+                      {campuses.filter(c => c.isActive).map(c => (
+                        <option key={c.id} value={c.id}>{c.code} — {c.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Không có trường thì họ đăng nhập vào và không thấy yêu cầu nào cả.
+                  </p>
+                </div>
+              )}
+
+              {inviteError && (
+                <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">{inviteError}</p>
+              )}
             </div>
 
-            <div className="flex gap-3 pt-2">
-              <Button variant="ghost" className="flex-1" onClick={() => setShowInviteModal(false)}>Hủy</Button>
-              <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700" onClick={handleInvite}>Gửi thư mời</Button>
+            <div className="flex gap-3 pt-1">
+              <Button variant="ghost" className="flex-1" onClick={() => { setShowInviteModal(false); setInviteError(null); }}>Hủy</Button>
+              <Button className="flex-1 bg-indigo-600 hover:bg-indigo-700" disabled={inviting} onClick={handleInvite}>
+                {inviting ? 'Đang lưu…' : 'Cấp quyền trước'}
+              </Button>
             </div>
           </motion.div>
         </div>
       )}
-      {invitations.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <Clock size={18} className="text-amber-500" />
-            Thư mời đang chờ ({invitations.filter(i => i.status === 'pending').length})
+
+      {invitations.filter(i => i.status === 'pending').length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+            <Clock size={16} className="text-amber-500" />
+            Đã cấp quyền trước, chờ họ đăng nhập ({invitations.filter(i => i.status === 'pending').length})
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {invitations.filter(i => i.status === 'pending').map(invite => (
-              <Card key={invite.id} className="p-4 border-dashed border-2 border-slate-200 bg-slate-50/50">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-sm font-bold text-slate-900">{invite.email}</p>
-                    <p className="text-xs text-slate-500 mt-1 capitalize">Vai trò: {invite.role}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {invitations.filter(i => i.status === 'pending').map(invite => {
+              const hetHan = (invite.expiresAt ?? 0) <= Date.now();
+              const truong = campuses.find(c => c.id === invite.campusId);
+              return (
+                <Card key={invite.id} className={cn("p-4 border-dashed border-2", hetHan ? "border-red-200 bg-red-50/40" : "border-slate-200 bg-slate-50/50")}>
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-900 truncate">{invite.email}</p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <Badge variant={invite.role === 'admin' ? 'danger' : invite.role === 'manager' ? 'info' : 'neutral'}>
+                          {String(invite.role).toUpperCase()}
+                        </Badge>
+                        {invite.supportRole && (
+                          <Badge variant="sky">
+                            {invite.supportRole === 'CAMPUS_FOCAL' ? 'Cán bộ nhà trường'
+                              : invite.supportRole === 'MODULE_OWNER' ? 'Cán bộ phụ trách' : 'Nhân viên dự án'}
+                            {truong ? ` · ${truong.code}` : ''}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className={cn("mt-1.5 text-[11px]", hetHan ? "text-red-600 font-semibold" : "text-slate-400")}>
+                        {hetHan ? 'Đã hết hạn — cấp lại nếu vẫn cần' : `Hết hạn ${format(new Date(invite.expiresAt), 'dd/MM/yyyy')}`}
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (confirm(`Gỡ quyền đã cấp trước cho ${invite.email}?`)) {
+                          await deleteInvitation(invite.email);
+                        }
+                      }}
+                      className="shrink-0 text-slate-400 hover:text-red-500 transition-colors"
+                      title="Gỡ"
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
-                  <button 
-                    onClick={async () => {
-                      if (confirm('Xóa thư mời này?')) {
-                        await deleteDoc(doc(db, 'invitations', invite.id));
-                      }
-                    }}
-                    className="text-slate-400 hover:text-red-500 transition-colors"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
           </div>
         </div>
       )}

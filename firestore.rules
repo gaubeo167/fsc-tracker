@@ -102,6 +102,17 @@ service cloud.firestore {
                       isAuthenticated() && request.auth.uid == userId &&
                       request.resource.data.role == 'user' &&
                       request.resource.data.status == 'pending'
+                    ) || (
+                      // Duyệt trước: admin đã ghi sẵn quyền cho email này, người
+                      // đó đăng nhập là nhận đúng những gì đã ghi — không hơn.
+                      //
+                      // An toàn vì ba lớp: chỉ admin ghi được invitations, doc id
+                      // LÀ email nên không tự trỏ sang thư mời của người khác, và
+                      // role phải khớp CHÍNH XÁC giá trị admin đã đặt.
+                      isAuthenticated() && request.auth.uid == userId &&
+                      myInviteUsable() &&
+                      request.resource.data.role == myInvite().get('role', 'user') &&
+                      request.resource.data.status == 'active'
                     );
 
       // Người dùng chỉ đổi được đúng 2 field hiển thị của chính mình.
@@ -114,6 +125,17 @@ service cloud.firestore {
                       isAuthenticated() && request.auth.uid == userId &&
                       request.resource.data.diff(resource.data).affectedKeys()
                         .hasOnly(['displayName', 'photoURL'])
+                    ) || (
+                      // Người đã từng đăng nhập trước khi được duyệt trước: hồ sơ
+                      // của họ đang 'pending'. Lần đăng nhập sau, thư mời nâng
+                      // đúng hai field này. Không mở rộng hơn.
+                      isAuthenticated() && request.auth.uid == userId &&
+                      resource.data.status == 'pending' &&
+                      myInviteUsable() &&
+                      request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['role', 'status']) &&
+                      request.resource.data.role == myInvite().get('role', 'user') &&
+                      request.resource.data.status == 'active'
                     );
 
       allow delete: if isAdmin();
@@ -233,11 +255,30 @@ service cloud.firestore {
     }
 
     // Invitations
-    match /invitations/{invitationId} {
-      allow read: if isAuthenticated();
-      allow create: if isAdmin();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+    // Thư mời duyệt trước. Doc id LÀ email viết thường.
+    //
+    // Vì sao không để id ngẫu nhiên: rules không truy vấn được, nên muốn kiểm
+    // "email này đã được duyệt trước chưa" thì phải tra được bằng đúng một
+    // get(). Id là email cũng làm cho việc mời trùng trở thành ghi đè thay vì
+    // sinh ra hai thư mời mâu thuẫn cho cùng một người.
+    match /invitations/{email} {
+      // KHÔNG cho mọi người đăng nhập đọc cả bảng: ở đó có ai sắp được làm
+      // admin, ai mời ai. Chỉ admin xem toàn bộ, còn người được mời xem đúng
+      // thư của chính mình.
+      allow read: if isAdmin()
+                  || (isAuthenticated() && request.auth.token.get('email', '') == email);
+      allow create, delete: if isAdmin();
+
+      // Admin sửa thoải mái. Người được mời chỉ đánh dấu ĐÃ DÙNG, không đụng
+      // được vào role/campusId của chính thư mời mình sắp nhận.
+      allow update: if isAdmin() || (
+                      isAuthenticated()
+                      && request.auth.token.get('email', '') == email
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['status', 'acceptedUid', 'acceptedAt'])
+                      && request.resource.data.status == 'accepted'
+                      && request.resource.data.acceptedUid == request.auth.uid
+                    );
     }
 
     // Connection Test
@@ -255,6 +296,27 @@ service cloud.firestore {
      * Đây là điều kiện nền cho mọi rule của module hỗ trợ: chưa duyệt thì
      * không đọc được gì, kể cả khi biết chính xác id document.
      */
+    /**
+     * Thư mời duyệt trước dành cho CHÍNH email đang đăng nhập.
+     *
+     * Doc id của invitations là email viết thường, nên tra được bằng một lượt
+     * get() thay vì phải truy vấn — mà rules thì không truy vấn được.
+     */
+    function myInvite() {
+      let email = request.auth.token.get('email', '');
+      let path = /databases/$(database)/documents/invitations/$(email);
+      return (email != '' && exists(path)) ? get(path).data : null;
+    }
+
+    function myInviteUsable() {
+      let inv = myInvite();
+      return inv != null
+        && inv.get('status', '') == 'pending'
+        // Hạn dùng: thư mời để vĩnh viễn nghĩa là một địa chỉ mời nhầm hôm nay
+        // vẫn tự lên quyền sau nửa năm, khi không ai còn nhớ đã mời ai.
+        && inv.get('expiresAt', 0) > request.time.toMillis();
+    }
+
     function isApproved() {
       let data = getUserData();
       return isAuthenticated() && data != null && data.status == 'active';
@@ -302,7 +364,21 @@ service cloud.firestore {
       // thông tin cá nhân nào ngoài những thứ đã nằm ở collection users vốn
       // mọi tài khoản đăng nhập đều đọc được.
       allow read: if isAdmin() || isPtudStaff() || (isAuthenticated() && request.auth.uid == uid);
-      allow create, update: if isAdmin();
+
+      // Duyệt trước: thư mời có ghi loại thành viên và trường thì người đó tự
+      // tạo được bản gán CỦA CHÍNH MÌNH, đúng bằng những gì admin đã ghi.
+      //
+      // Không có nhánh này thì "duyệt trước" chỉ xong một nửa: người đó vào
+      // được hệ thống nhưng không thuộc trường nào, và màn hỗ trợ báo chưa
+      // được gán trường — đúng cái bước thủ công mà tính năng này xoá bỏ.
+      allow create: if isAdmin() || (
+                      isAuthenticated() && request.auth.uid == uid
+                      && myInviteUsable()
+                      && myInvite().get('supportRole', '') != ''
+                      && request.resource.data.supportRole == myInvite().get('supportRole', '')
+                      && request.resource.data.campusId == myInvite().get('campusId', null)
+                    );
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
