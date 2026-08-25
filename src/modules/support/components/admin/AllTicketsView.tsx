@@ -189,7 +189,7 @@ export function AllTicketsView({
                       {t.priority ? <PriorityBadge priority={t.priority} /> : <span className="text-xs text-slate-300">—</span>}
                     </td>
                     <td className={cn(TABLE.cell, 'text-right')}>
-                      <DueCell dueAt={t.dueAt} isOpen={OPEN_STATUSES.includes(t.status)} />
+                      <DueCell dueAt={t.dueAt} isOpen={OPEN_STATUSES.includes(t.status)} estimateDays={t.estimateDays} />
                     </td>
                   </tr>
                 ))}

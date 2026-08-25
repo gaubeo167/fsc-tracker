@@ -171,6 +171,16 @@ describe('tạo phiếu', () => {
     );
   });
 
+  it('KHÔNG tự khai số ngày dự kiến — đó là con số của bước tiếp nhận', async () => {
+    // estimateDays là cam kết của đội kỹ thuật khi tiếp nhận mà chưa chốt được
+    // hạn. Trường tự ghi được thì phiếu của họ hiện ra "dự kiến 1 ngày" như thể
+    // đã có người hứa.
+    const db = testEnv.authenticatedContext(USER_A).firestore();
+    await assertFails(
+      setDoc(doc(db, 'support_tickets', 'moi-6'), ticket({ estimateDays: 1 }))
+    );
+  });
+
   it('KHÔNG tự đặt phiếu thành SYSTEM_WIDE để phát thông báo cho 18 trường', async () => {
     // Phạm vi do đầu mối phân hệ xác định ở bước triage (§2). Người báo lỗi tự
     // đặt được là tự bắn thông báo tới toàn hệ thống.

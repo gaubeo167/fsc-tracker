@@ -218,7 +218,20 @@ export interface Ticket {
   triagedBy: string | null;
   triagedAt: number | null;
 
+  /**
+   * Hạn hoàn thành. null = đã tiếp nhận nhưng CHƯA chốt được hạn.
+   *
+   * Không phải phiếu nào cũng biết hạn ngay lúc tiếp nhận: nhiều yêu cầu phải
+   * họp hoặc phải chờ phân hệ khác mới ước lượng được. Lúc đó đầu mối để trống
+   * hạn và chỉ khai estimateDays; hạn thật hình thành khi người xử lý chọn ngày
+   * bắt đầu bên module Công việc, rồi được đồng bộ ngược về đây.
+   */
   dueAt: number | null;
+  /**
+   * Số ngày làm việc dự kiến, khai ở bước tiếp nhận khi chưa chốt được hạn.
+   * 0 nghĩa là không dùng tới (phiếu đã có hạn cụ thể).
+   */
+  estimateDays: number;
   slaPolicyId: string | null;
   firstResponseAt: number | null;
   resolvedAt: number | null;

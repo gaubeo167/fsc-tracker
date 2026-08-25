@@ -221,6 +221,7 @@ export async function createTicket(input: CreateTicketInput): Promise<Ticket> {
       triagedBy: null,
       triagedAt: null,
       dueAt: null,
+      estimateDays: 0,
       slaPolicyId: null,
       firstResponseAt: null,
       resolvedAt: null,
@@ -304,6 +305,8 @@ function normalizeTicket(id: string, raw: unknown): Ticket {
     titleTokens: (d.titleTokens as string[]) ?? [],
     bodyTokens: (d.bodyTokens as string[]) ?? [],
     reopenCount: Number(d.reopenCount ?? 0),
+    // Phiếu tạo trước khi có tính năng "chưa xác định hạn" không mang field này.
+    estimateDays: Number(d.estimateDays ?? 0),
     needsInfoRequest: String(d.needsInfoRequest ?? ''),
     rejectionReason: String(d.rejectionReason ?? ''),
   };
@@ -657,7 +660,21 @@ export interface AcceptTicketInput {
   projectId: string;
   priority: TicketPriority;
   assigneeUserId: string;
-  dueAt: number;
+  /**
+   * Hạn chốt, hoặc null khi đầu mối tiếp nhận mà chưa xác định được hạn.
+   *
+   * null KHÔNG phải "quên điền": nhiều phiếu phải họp hoặc phải chờ phân hệ khác
+   * mới biết bao giờ xong. Ép chọn đại một ngày ở bước tiếp nhận thì cả báo cáo
+   * quá hạn về sau chạy trên một con số bịa. Đi cùng null là estimateDays.
+   */
+  dueAt: number | null;
+  /**
+   * Số ngày làm việc dự kiến. BẮT BUỘC khi dueAt = null.
+   *
+   * Ghi vào estimatedDuration của task. Hạn thật hình thành bên module Công việc
+   * lúc người xử lý chọn ngày bắt đầu: ngày bắt đầu + số ngày này.
+   */
+  estimateDays?: number;
   actorUid: string;
   /** Ghi chú của đầu mối, đưa vào phần mô tả của task. */
   note?: string;
@@ -686,6 +703,17 @@ export async function acceptTicket(
   input: AcceptTicketInput
 ): Promise<{ ok: boolean; taskId: string | null; error: RepoError | null }> {
   const { ticket, projectId, priority, assigneeUserId, dueAt, actorUid, note } = input;
+  // Số ngày dự kiến chỉ có nghĩa khi chưa chốt được hạn. Có hạn rồi mà vẫn ghi
+  // estimatedDuration thì màn chi tiết công việc tự tính lại hạn = ngày bắt đầu
+  // + số ngày, và đè mất cái hạn hai bên vừa thống nhất.
+  const estimateDays = dueAt === null ? Math.max(1, Math.round(input.estimateDays ?? 0)) : 0;
+
+  if (dueAt === null && !input.estimateDays) {
+    throw new DomainError(
+      'ESTIMATE_DAYS_REQUIRED',
+      'Chưa xác định hạn thì phải cho biết số ngày dự kiến hoàn thành.'
+    );
+  }
 
   if (ticket.status !== 'TRIAGE' && ticket.status !== 'NEEDS_INFO') {
     throw new DomainError(
@@ -753,7 +781,15 @@ export async function acceptTicket(
       // cần thêm một vòng duyệt nữa ở module Công việc.
       status: 'todo',
       progress: 0,
-      date: new Date(dueAt).toISOString().slice(0, 10),
+      // Chưa chốt hạn thì để RỖNG, không bịa một ngày.
+      //
+      // Module Công việc coi date rỗng là "chưa có hạn": không tô đỏ, không tính
+      // quá hạn. Còn estimatedDuration là thứ biến nó thành hạn thật — người xử
+      // lý chọn ngày bắt đầu, màn chi tiết tự cộng ra hạn.
+      date: dueAt === null ? '' : new Date(dueAt).toISOString().slice(0, 10),
+      startDate: '',
+      estimatedDuration: estimateDays,
+      estimatedDeadline: '',
       assignees: [assigneeUserId],
       // Đầu mối tiếp nhận là người nghiệm thu — họ biết phiếu gốc yêu cầu gì.
       reviewers: [actorUid],
@@ -776,6 +812,9 @@ export async function acceptTicket(
       priority,
       assigneeUserId,
       dueAt,
+      // Ghi cả khi có hạn (bằng 0): field luôn tồn tại thì màn hiển thị không
+      // phải phân biệt "chưa xác định" với "phiếu cũ chưa có field".
+      estimateDays,
       triagedBy: actorUid,
       triagedAt: now,
       linkedProjectId: projectId,
@@ -792,7 +831,15 @@ export async function acceptTicket(
     for (const uid of new Set(
       [ticket.reporterUserId, ticket.campusContactUserId ?? ''].filter(Boolean)
     )) {
-      baoCho(uid, `Yêu cầu ${ticket.ticketNo} đã được tiếp nhận và đang được xử lý. Hạn dự kiến ${new Date(dueAt).toLocaleDateString('vi-VN')}.`);
+      baoCho(
+        uid,
+        dueAt === null
+          // Nói thẳng là chưa có hạn kèm ước lượng, thay vì im lặng bỏ câu hạn.
+          // Trường đọc thông báo không thấy hạn sẽ hiểu là hệ thống lỗi, rồi gọi
+          // điện hỏi lại đúng thứ mà thông báo đáng lẽ phải nói.
+          ? `Yêu cầu ${ticket.ticketNo} đã được tiếp nhận. Hạn hoàn thành chưa chốt, dự kiến ${estimateDays} ngày làm việc kể từ khi bắt đầu xử lý.`
+          : `Yêu cầu ${ticket.ticketNo} đã được tiếp nhận và đang được xử lý. Hạn dự kiến ${new Date(dueAt).toLocaleDateString('vi-VN')}.`
+      );
     }
 
     // Báo cho NGƯỜI XỬ LÝ và những người được CC rằng có công việc mới.
@@ -1202,6 +1249,20 @@ export function ticketStatusFromTask(
 }
 
 /**
+ * Hạn của task ('yyyy-mm-dd') đổi sang mốc hạn của phiếu.
+ *
+ * 17:00 giờ VN của ngày đó — cuối giờ làm việc, đúng nghĩa "hạn trong ngày", và
+ * đúng công thức màn tiếp nhận dùng khi đầu mối tự chọn ngày. Hai chỗ lệch nhau
+ * thì mỗi lượt đồng bộ lại ghi đè hạn bằng một mốc chênh vài tiếng.
+ */
+function hanTuNgayTask(raw: unknown): number | null {
+  const ngay = String(raw ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ngay)) return null;
+  const ms = Date.parse(`${ngay}T00:00:00Z`);
+  return Number.isNaN(ms) ? null : ms + 17 * 3600_000 - 7 * 3600_000;
+}
+
+/**
  * Task nào đang có một lượt đồng bộ chạy dở.
  *
  * Thanh kéo tiến độ trong module Công việc là <input type="range"> ghi thẳng
@@ -1274,10 +1335,29 @@ async function dongBoMotLuot(
       const target = ticketStatusFromTask(
         String(task.status ?? ''), Number(task.progress ?? 0), ticket.status
       );
-      if (!target) return { changed: false };
+
+      // Hạn của phiếu đi theo hạn của công việc.
+      //
+      // Phiếu tiếp nhận ở chế độ "chưa xác định" có dueAt = null: hạn thật chỉ
+      // hình thành khi người xử lý chọn ngày bắt đầu bên module Công việc, và
+      // chỗ đó tự tính hạn = ngày bắt đầu + số ngày dự kiến. Không kéo ngược về
+      // đây thì trường mãi mãi nhìn thấy "chưa xác định" trong khi đội kỹ thuật
+      // đã chốt ngày từ lâu — và toàn bộ cảnh báo quá hạn im lặng theo.
+      //
+      // Chạy cả khi trạng thái không đổi: người xử lý sửa hạn mà chưa động vào
+      // tiến độ là chuyện thường.
+      const hanTask = hanTuNgayTask(task.date);
+      const doiHan = hanTask !== null && hanTask !== ticket.dueAt;
+      if (!target && !doiHan) return { changed: false };
 
       const now = Date.now();
-      const patch: Record<string, unknown> = { status: target, updatedAt: now };
+      const patch: Record<string, unknown> = { updatedAt: now };
+      if (doiHan) patch.dueAt = hanTask;
+      if (!target) {
+        tx.update(ref, patch);
+        return { changed: true };
+      }
+      patch.status = target;
       if (target === 'RESOLVED' || target === 'CLOSED') {
         patch.slaLastResumedAt = null;
         patch.slaElapsedWorkingMs = dungDongHo(ticket, now);

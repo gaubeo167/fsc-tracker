@@ -66,12 +66,29 @@ export const TICKET_STATUS: Record<
   REJECTED: { label: 'Từ chối', variant: 'danger', Icon: XCircle },
 };
 
-/** Độ ưu tiên: nhãn ngắn + mô tả đầy đủ cho tooltip. */
+/**
+ * Độ ưu tiên: nhãn ngắn + tên mức cho tooltip.
+ *
+ * Dùng thẳng thang ưu tiên chuẩn của phát triển phần mềm — Critical / High /
+ * Medium / Low — chứ không mô tả phạm vi ảnh hưởng ("chặn nhiều trường", "chặn
+ * một trường"). Hai lý do:
+ *
+ *   - Phạm vi ảnh hưởng đã có trường riêng của nó (scope, affectedCampusIds,
+ *     impactScale). Nhét thêm vào nhãn ưu tiên là nói cùng một điều ở hai chỗ,
+ *     và hai chỗ đó lệch nhau ngay lần đầu có phiếu chặn một trường nhưng chặn
+ *     cả kỳ thu học phí.
+ *   - Ưu tiên là mức độ KHẨN, không phải số trường bị ảnh hưởng. Đầu mối cần
+ *     nâng được một phiếu một trường lên Khẩn cấp mà không thấy nhãn cãi lại
+ *     lựa chọn của mình.
+ *
+ * Đúng thang mà module Công việc đang dùng (Thấp / Trung bình / Cao / Khẩn cấp),
+ * nên P1..P4 ánh xạ thẳng sang priority của task, không phải dịch lại.
+ */
 export const TICKET_PRIORITY: Record<TicketPriority, { label: string; full: string; variant: BadgeVariant }> = {
-  P1: { label: 'P1', full: 'P1 — Chặn nghiệp vụ nhiều trường', variant: 'danger' },
-  P2: { label: 'P2', full: 'P2 — Chặn nghiệp vụ một trường', variant: 'warning' },
-  P3: { label: 'P3', full: 'P3 — Ảnh hưởng cục bộ', variant: 'info' },
-  P4: { label: 'P4', full: 'P4 — Hiển thị, không chặn', variant: 'neutral' },
+  P1: { label: 'P1', full: 'P1 — Khẩn cấp (Critical)', variant: 'danger' },
+  P2: { label: 'P2', full: 'P2 — Cao (High)', variant: 'warning' },
+  P3: { label: 'P3', full: 'P3 — Trung bình (Medium)', variant: 'info' },
+  P4: { label: 'P4', full: 'P4 — Thấp (Low)', variant: 'neutral' },
 };
 
 /** Loại phiếu: icon + màu. Bug đỏ, đề xuất tím — nhất quán ở mọi màn. */
@@ -159,10 +176,26 @@ export function fmtTime(ms: number | null): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
-/** Hạn xử lý kèm trạng thái quá hạn. */
-export function DueCell({ dueAt, isOpen }: { dueAt: number | null; isOpen: boolean }) {
+/**
+ * Hạn xử lý kèm trạng thái quá hạn.
+ *
+ * `estimateDays > 0` là phiếu được tiếp nhận với hạn CHƯA xác định — khác hẳn
+ * phiếu chưa ai tiếp nhận nên chưa có hạn. Cùng hiện dấu gạch thì đầu mối không
+ * phân biệt được "chưa ai nhận" với "đã nhận, đang chờ chốt lịch".
+ */
+export function DueCell({
+  dueAt, isOpen, estimateDays = 0,
+}: { dueAt: number | null; isOpen: boolean; estimateDays?: number }) {
   const overdue = !!dueAt && dueAt < Date.now() && isOpen;
-  if (!dueAt) return <span className="text-xs text-slate-300">—</span>;
+  if (!dueAt) {
+    return estimateDays > 0
+      ? (
+        <span className="text-xs text-slate-500" title={`Dự kiến ${estimateDays} ngày làm việc kể từ khi bắt đầu xử lý`}>
+          Chưa xác định
+        </span>
+      )
+      : <span className="text-xs text-slate-300">—</span>;
+  }
   return (
     <span
       className={cn(

@@ -230,9 +230,27 @@ function RowMenu({
   );
 }
 
-/** Hạn xử lý: ngày trên, giờ dưới, đỏ đậm khi đã quá hạn. */
-function DueBlock({ dueAt, isOpen }: { dueAt: number | null; isOpen: boolean }) {
-  if (!dueAt) return <span className="text-sm text-slate-300">—</span>;
+/**
+ * Hạn xử lý: ngày trên, giờ dưới, đỏ đậm khi đã quá hạn.
+ *
+ * Phiếu đã tiếp nhận nhưng chưa chốt được hạn (estimateDays > 0) nói rõ là chưa
+ * xác định kèm số ngày dự kiến. Đây là màn của TRƯỜNG — thấy dấu gạch ở ô hạn
+ * thì họ hiểu là chưa ai nhận phiếu, rồi gọi điện hỏi lại đội kỹ thuật.
+ */
+function DueBlock({
+  dueAt, isOpen, estimateDays = 0,
+}: { dueAt: number | null; isOpen: boolean; estimateDays?: number }) {
+  if (!dueAt) {
+    if (estimateDays > 0) {
+      return (
+        <span className="block text-xs text-slate-600">
+          Chưa xác định
+          <span className="block font-normal text-slate-400">dự kiến {estimateDays} ngày</span>
+        </span>
+      );
+    }
+    return <span className="text-sm text-slate-300">—</span>;
+  }
   const overdue = dueAt < Date.now() && isOpen;
   return (
     <span className={cn('block text-xs tabular-nums', overdue ? 'font-bold text-red-600' : 'text-slate-600')}>
@@ -478,7 +496,7 @@ export function CampusDashboard({
                       <td className="px-3 py-3 align-top"><ModuleCell code={t.moduleId} /></td>
                       <td className="px-3 py-3 align-top"><StatusBadge status={t.status} /></td>
                       <td className="px-3 py-3 align-top">
-                        <DueBlock dueAt={t.dueAt} isOpen={OPEN_STATUSES.includes(t.status)} />
+                        <DueBlock dueAt={t.dueAt} isOpen={OPEN_STATUSES.includes(t.status)} estimateDays={t.estimateDays} />
                       </td>
                       <td className="px-4 py-3 text-right align-top">
                         <RowMenu
@@ -507,7 +525,7 @@ export function CampusDashboard({
                     <p className="mt-1.5 text-sm font-semibold text-slate-900">{t.title}</p>
                     <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
                       <ModuleCell code={t.moduleId} />
-                      <DueBlock dueAt={t.dueAt} isOpen={OPEN_STATUSES.includes(t.status)} />
+                      <DueBlock dueAt={t.dueAt} isOpen={OPEN_STATUSES.includes(t.status)} estimateDays={t.estimateDays} />
                     </div>
                   </button>
                 </li>

@@ -169,6 +169,14 @@ const getDeadlineStyle = (dateStr: string, status: TaskStatus) => {
   return 'text-slate-600';
 };
 
+/**
+ * Chữ hiện ở ô hạn khi task chưa có hạn.
+ *
+ * Task sinh từ phiếu hỗ trợ được tiếp nhận với hạn "chưa xác định" có date rỗng
+ * — và một ô trống trông y hệt lỗi tải dữ liệu. Nói thẳng ra là chưa có hạn.
+ */
+const CHUA_CO_HAN = 'Chưa có hạn';
+
 const isTaskOverdue = (task: Task) => {
   if (task.status === 'done') return false;
   if (!task.date) return false;
@@ -638,7 +646,7 @@ const TaskCard: React.FC<{
           </Badge>
         </div>
         <span className={cn("text-[10px] font-mono whitespace-nowrap", getDeadlineStyle(task.date, task.status))}>
-          {task.date}
+          {task.date || CHUA_CO_HAN}
         </span>
       </div>
       
@@ -847,7 +855,7 @@ const TaskListItem: React.FC<{
         </div>
         <div className="flex items-center gap-4 text-[10px]">
           <span className={cn("flex items-center gap-1", getDeadlineStyle(task.date, task.status))}>
-            <Clock size={12} /> {task.date}
+            <Clock size={12} /> {task.date || CHUA_CO_HAN}
           </span>
           <div className="flex items-center gap-1">
             <Users size={12} className="text-slate-400" />
@@ -999,7 +1007,7 @@ const TaskTable: React.FC<{
                 </span>
               </td>
               <td className="px-4 py-3">
-                <span className={cn("text-xs tabular-nums", getDeadlineStyle(task.date, task.status))}>{task.date || '—'}</span>
+                <span className={cn("text-xs tabular-nums", getDeadlineStyle(task.date, task.status))}>{task.date || CHUA_CO_HAN}</span>
               </td>
               <td className="px-4 py-3">
                 <Badge variant={
@@ -1205,7 +1213,13 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     description: task.description || '',
     category: task.category || '',
     priority: task.priority || 'medium',
-    date: task.date || format(new Date(), 'yyyy-MM-dd'),
+    // KHÔNG lấy hôm nay làm mặc định cho ba mốc thời gian dưới đây.
+    //
+    // Task sinh từ phiếu hỗ trợ tiếp nhận với hạn "chưa xác định" cố ý không có
+    // hạn: nó chỉ mang số ngày dự kiến, và hạn hình thành khi người xử lý chọn
+    // ngày bắt đầu. Điền sẵn hôm nay thì mở màn chi tiết ra là thấy một cái hạn
+    // chưa ai đặt, và chỉ cần bấm Lưu vì bất kỳ lý do gì là nó thành hạn thật.
+    date: task.date || '',
     assignees: task.assignees || [],
     reviewers: task.reviewers || [],
     cc: task.cc || [],
@@ -1213,9 +1227,9 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     attachedImages: task.attachedImages || [],
     progress: task.progress || 0,
     status: task.status || 'todo',
-    startDate: task.startDate || format(new Date(), 'yyyy-MM-dd'),
+    startDate: task.startDate || '',
     estimatedDuration: task.estimatedDuration || 0,
-    estimatedDeadline: task.estimatedDeadline || format(new Date(), 'yyyy-MM-dd'),
+    estimatedDeadline: task.estimatedDeadline || '',
     subtasks: task.subtasks || [],
     comments: task.comments || []
   });
@@ -1290,7 +1304,11 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
 
   const handleSave = async () => {
     // Validate that task deadline is not earlier than any subtask deadline
-    const invalidSubtask = editedTask.subtasks.find(s => s.deadline > editedTask.date);
+    // Chỉ so khi task lớn có hạn: task chưa chốt hạn (date rỗng) thì mọi hạn của
+    // công việc nhỏ đều "lớn hơn" chuỗi rỗng, và người dùng không lưu nổi gì.
+    const invalidSubtask = editedTask.date
+      ? editedTask.subtasks.find(s => s.deadline > editedTask.date)
+      : undefined;
     if (invalidSubtask) {
       showToast(`Hạn của task lớn không được sớm hơn hạn của công việc nhỏ: "${invalidSubtask.text}" (${format(new Date(invalidSubtask.deadline), 'dd/MM/yyyy')})`, 'error');
       return;
@@ -1335,6 +1353,14 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
 
       if (!task.projectId) throw new Error('Missing projectId');
       await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), taskData);
+
+      // Phiếu hỗ trợ phải biết công việc vừa đổi gì.
+      //
+      // Trước đây chỉ những nút đổi tiến độ / trạng thái mới gọi đồng bộ, nên
+      // lưu bằng nút "Lưu" của màn chi tiết không kéo được gì về phiếu. Việc đó
+      // giờ quan trọng hơn: phiếu tiếp nhận ở chế độ "chưa xác định hạn" chỉ có
+      // hạn thật khi người xử lý đặt ngày bắt đầu và bấm lưu ở đúng đây.
+      void syncTicketFromTask(task.projectId, task.id);
 
       // Send notifications for involvement changes
       const oldTargets = new Set([...(task.assignees || []), ...(task.reviewers || []), ...(task.cc || [])]);
@@ -1424,7 +1450,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     if (!newSubtask.text.trim()) return;
     
     // Validate subtask deadline
-    if (newSubtask.deadline > editedTask.date) {
+    if (editedTask.date && newSubtask.deadline > editedTask.date) {
       showToast(`Hạn hoàn thành của công việc nhỏ không được vượt quá hạn của task lớn (${format(new Date(editedTask.date), 'dd/MM/yyyy')})`, 'error');
       return;
     }
@@ -1444,7 +1470,9 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
       subtasks: newSubtasks,
       progress
     });
-    setNewSubtask({ text: '', deadline: editedTask.date });
+    // Task lớn chưa có hạn thì lấy hôm nay, không để ô hạn rỗng — công việc nhỏ
+    // không hạn rơi thẳng vào chỗ hiển thị ngày và in ra "Invalid Date".
+    setNewSubtask({ text: '', deadline: editedTask.date || today });
 
     try {
       await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), { 
@@ -1461,7 +1489,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     if (!editingSubtask || !editingSubtask.text.trim()) return;
 
     // Validate subtask deadline
-    if (editingSubtask.deadline > editedTask.date) {
+    if (editedTask.date && editingSubtask.deadline > editedTask.date) {
       showToast(`Hạn hoàn thành của công việc nhỏ không được vượt quá hạn của task lớn (${format(new Date(editedTask.date), 'dd/MM/yyyy')})`, 'error');
       return;
     }
@@ -1715,7 +1743,9 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
             </div>
             <div className="flex items-center gap-2 text-slate-500 border-l border-slate-200 pl-3 ml-1">
               <Clock size={16} />
-              <span className="text-sm font-medium">{format(new Date(editedTask.date), 'dd/MM/yyyy')}</span>
+              <span className="text-sm font-medium">
+                {editedTask.date ? format(new Date(editedTask.date), 'dd/MM/yyyy') : CHUA_CO_HAN}
+              </span>
             </div>
             <h2 className="text-xl font-bold text-slate-900 ml-2">{editedTask.title}</h2>
             {/* Đường về phiếu hỗ trợ đã sinh ra công việc này. Không có nó thì
@@ -2978,7 +3008,7 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
                           </span>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={cn("text-xs", getDeadlineStyle(task.date, task.status))}>{task.date}</span>
+                          <span className={cn("text-xs", getDeadlineStyle(task.date, task.status))}>{task.date || CHUA_CO_HAN}</span>
                         </td>
                         <td className="px-4 py-3">
                           <Badge variant={

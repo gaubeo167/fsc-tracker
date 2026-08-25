@@ -460,6 +460,10 @@ service cloud.firestore {
                     request.resource.data.get('priority', null) == null &&
                     request.resource.data.get('assigneeUserId', null) == null &&
                     request.resource.data.get('dueAt', null) == null &&
+                    // Số ngày dự kiến cũng là field của bước tiếp nhận. Không
+                    // ghim thì trường tự khai "dự kiến 1 ngày" trên phiếu của
+                    // mình, và con số đó hiện ra như thể đội kỹ thuật đã cam kết.
+                    request.resource.data.get('estimateDays', 0) == 0 &&
                     request.resource.data.get('triagedBy', null) == null &&
                     request.resource.data.get('triagedAt', null) == null &&
                     request.resource.data.get('linkedProjectId', null) == null &&

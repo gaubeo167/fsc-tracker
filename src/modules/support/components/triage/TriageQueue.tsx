@@ -58,13 +58,39 @@ function Nhan({ icon, children, bat }: { icon: React.ReactNode; children: React.
   );
 }
 
+/** Một ngày làm việc = 08:00-17:00. Bằng WORKDAY trong slaCalculator. */
+const PHUT_MOT_NGAY_LAM = 9 * 60;
+
+/** Số ngày dự kiến tối đa nhập được — chặn gõ nhầm 300 thành 3000. */
+const NGAY_DU_KIEN_TOI_DA = 180;
+
+/** Hạn chốt theo ngày, hay chưa chốt được và chỉ ước lượng số ngày. */
+type CheDoHan = 'NGAY' | 'CHUA_XAC_DINH';
+
 interface Draft {
   priority: TicketPriority;
   assigneeUserId: string;
+  /** Cách đặt hạn. 'CHUA_XAC_DINH' thì dueAt không được gửi đi. */
+  cheDoHan: CheDoHan;
   dueAt: number;
+  /** Số ngày làm việc dự kiến, chỉ dùng khi cheDoHan = 'CHUA_XAC_DINH'. */
+  soNgayDuKien: number;
+  /**
+   * Người dùng đã tự sửa hạn / số ngày chưa.
+   *
+   * Cần một cờ tường minh chứ không so dueAt với giá trị SLA tính lại: SLA tính
+   * từ Date.now() nên hai lần gọi cách nhau một mili giây đã ra hai con số khác
+   * nhau, và phép so đó lúc đúng lúc sai tuỳ vào máy chạy nhanh hay chậm.
+   */
+  tuSuaHan: boolean;
   note: string;
   /** Người cần nắm thông tin, không phải người xử lý. */
   cc: string[];
+}
+
+/** Ngân sách SLA (phút làm việc) của phiếu ở độ ưu tiên đang chọn. */
+function slaMinutes(ticket: Ticket, priority: TicketPriority): number {
+  return findPolicy(ticket.type, priority)?.resolutionMinutes ?? 8 * 60;
 }
 
 /**
@@ -75,9 +101,12 @@ interface Draft {
  * quá hạn cho một ngày không ai đi làm.
  */
 function defaultDueAt(ticket: Ticket, priority: TicketPriority, cal: WorkingCalendar): number {
-  const policy = findPolicy(ticket.type, priority);
-  const minutes = policy?.resolutionMinutes ?? 8 * 60;
-  return addWorkingMs(Date.now(), minutes * 60_000, cal);
+  return addWorkingMs(Date.now(), slaMinutes(ticket, priority) * 60_000, cal);
+}
+
+/** Số ngày làm việc dự kiến, suy từ CÙNG ngân sách SLA với hạn ở trên. */
+function defaultSoNgay(ticket: Ticket, priority: TicketPriority): number {
+  return Math.max(1, Math.ceil(slaMinutes(ticket, priority) / PHUT_MOT_NGAY_LAM));
 }
 
 function toDateInput(ms: number): string {
@@ -166,7 +195,13 @@ export function TriageQueue({
       // không hạ thấp thành P4 rồi quên.
       priority: 'P3',
       assigneeUserId: actorUid,
+      // Mặc định vẫn là hạn theo ngày. "Chưa xác định" là lối thoát cho phiếu
+      // phải họp mới chốt được, không phải đường mặc định — để mặc định thì mọi
+      // phiếu đều trôi ra khỏi hàng đợi mà không ai chịu trách nhiệm về hạn.
+      cheDoHan: 'NGAY',
       dueAt: defaultDueAt(t, 'P3', lichLamViec),
+      soNgayDuKien: defaultSoNgay(t, 'P3'),
+      tuSuaHan: false,
       note: '',
       cc: [],
     };
@@ -176,10 +211,16 @@ export function TriageQueue({
     setDrafts((d) => {
       const cur = d[t.id] ?? draftOf(t);
       const next = { ...cur, ...p };
-      // Đổi độ ưu tiên thì hạn tính lại theo SLA, TRỪ KHI người dùng đã tự sửa
-      // hạn — không được ghi đè lựa chọn của họ.
-      if (p.priority && p.dueAt === undefined && cur.dueAt === defaultDueAt(t, cur.priority, lichLamViec)) {
+      // Sửa hạn hoặc số ngày là quyết định của người tiếp nhận — ghim lại.
+      if (p.dueAt !== undefined || p.soNgayDuKien !== undefined) next.tuSuaHan = true;
+      // Đổi độ ưu tiên thì hạn VÀ số ngày cùng tính lại theo SLA, TRỪ KHI người
+      // dùng đã tự sửa — không được ghi đè lựa chọn của họ.
+      //
+      // Đổi chế độ hạn không tính là "tự sửa": người ta mới chỉ nói cách đặt
+      // hạn, chưa nói hạn là bao nhiêu.
+      if (p.priority && !next.tuSuaHan) {
         next.dueAt = defaultDueAt(t, p.priority, lichLamViec);
+        next.soNgayDuKien = defaultSoNgay(t, p.priority);
       }
       return { ...d, [t.id]: next };
     });
@@ -219,6 +260,22 @@ export function TriageQueue({
   async function accept(t: Ticket) {
     const d = draftOf(t);
     const cfg = moduleById[t.moduleId];
+    const chuaChotHan = d.cheDoHan === 'CHUA_XAC_DINH';
+    // Chặn ở đây thay vì để repository ném: số ngày là thứ DUY NHẤT phiếu chưa
+    // chốt hạn còn mang theo, gửi đi con số rỗng thì công việc sinh ra không có
+    // hạn lẫn không có ước lượng.
+    if (chuaChotHan && (!Number.isFinite(d.soNgayDuKien) || d.soNgayDuKien < 1)) {
+      setRowError((e) => ({ ...e, [t.id]: 'Nhập số ngày dự kiến hoàn thành (ít nhất 1 ngày).' }));
+      return;
+    }
+    // max của <input type="number"> chỉ chặn nút tăng/giảm, gõ tay vẫn qua.
+    if (chuaChotHan && d.soNgayDuKien > NGAY_DU_KIEN_TOI_DA) {
+      setRowError((e) => ({
+        ...e,
+        [t.id]: `Số ngày dự kiến tối đa ${NGAY_DU_KIEN_TOI_DA} ngày. Dài hơn thế thì nên tách thành nhiều yêu cầu.`,
+      }));
+      return;
+    }
     setBusy(t.id);
     try {
       const { ok, error: err } = await acceptTicket({
@@ -226,7 +283,8 @@ export function TriageQueue({
         projectId: cfg?.projectId ?? '',
         priority: d.priority,
         assigneeUserId: d.assigneeUserId,
-        dueAt: d.dueAt,
+        dueAt: chuaChotHan ? null : d.dueAt,
+        estimateDays: chuaChotHan ? Math.round(d.soNgayDuKien) : undefined,
         actorUid,
         note: d.note,
         ccUserIds: d.cc,
@@ -444,10 +502,13 @@ export function TriageQueue({
                               onChange={(e) => patch(t, { priority: e.target.value as TicketPriority })}
                               className={O_NHAP}
                             >
-                              <option value="P1">P1 — Chặn nhiều trường</option>
-                              <option value="P2">P2 — Chặn một trường</option>
-                              <option value="P3">P3 — Ảnh hưởng cục bộ</option>
-                              <option value="P4">P4 — Hiển thị, không chặn</option>
+                              {/* Thang ưu tiên chuẩn phát triển phần mềm, khớp
+                                  với module Công việc. Phạm vi ảnh hưởng đã có
+                                  trường riêng — không mô tả lại ở đây. */}
+                              <option value="P1">P1 — Khẩn cấp</option>
+                              <option value="P2">P2 — Cao</option>
+                              <option value="P3">P3 — Trung bình</option>
+                              <option value="P4">P4 — Thấp</option>
                             </select>
                           </label>
 
@@ -480,18 +541,60 @@ export function TriageQueue({
                             )}
                           </label>
 
-                          <label className="block">
+                          {/* Hạn hoàn thành, hai chế độ.
+                              Rất nhiều phiếu được tiếp nhận trước khi ai biết
+                              bao giờ làm xong — phải họp, phải chờ phân hệ khác.
+                              Ép chọn một ngày cụ thể ở thời điểm đó chỉ sinh ra
+                              một con số bịa, rồi cả hệ thống báo quá hạn theo
+                              con số bịa đó. Cho khai thẳng "chưa xác định" kèm
+                              số ngày dự kiến thì hạn thật hình thành lúc người
+                              xử lý chọn được ngày bắt đầu. */}
+                          <div className="block">
                             <Nhan icon={<CalendarClock size={ICON.sm} />} bat>Hạn hoàn thành</Nhan>
-                            <input
-                              type="date"
-                              value={toDateInput(d.dueAt)}
-                              onChange={(e) => patch(t, { dueAt: fromDateInput(e.target.value) })}
+                            <select
+                              value={d.cheDoHan}
+                              onChange={(e) => patch(t, { cheDoHan: e.target.value as CheDoHan })}
                               className={O_NHAP}
-                            />
-                            <span className="mt-1 block text-[11px] text-slate-400">
-                              Điền sẵn theo SLA của {d.priority}
-                            </span>
-                          </label>
+                              aria-label="Cách đặt hạn hoàn thành"
+                            >
+                              <option value="NGAY">Chốt ngày cụ thể</option>
+                              <option value="CHUA_XAC_DINH">Chưa xác định — chỉ ước lượng số ngày</option>
+                            </select>
+
+                            {d.cheDoHan === 'NGAY' ? (
+                              <>
+                                <input
+                                  type="date"
+                                  value={toDateInput(d.dueAt)}
+                                  onChange={(e) => patch(t, { dueAt: fromDateInput(e.target.value) })}
+                                  className={cn(O_NHAP, 'mt-2')}
+                                  aria-label="Ngày hết hạn"
+                                />
+                                <span className="mt-1 block text-[11px] text-slate-400">
+                                  Điền sẵn theo SLA của {d.priority}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <div className={cn(O_NHAP, 'mt-2 flex items-center gap-2 py-0 pr-0')}>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={NGAY_DU_KIEN_TOI_DA}
+                                    step={1}
+                                    value={Number.isFinite(d.soNgayDuKien) ? d.soNgayDuKien : ''}
+                                    onChange={(e) => patch(t, { soNgayDuKien: Number(e.target.value) })}
+                                    className="w-full border-none bg-transparent py-2.5 text-sm text-slate-800 focus:outline-none"
+                                    aria-label="Số ngày dự kiến hoàn thành"
+                                  />
+                                  <span className="shrink-0 pr-3 text-xs text-slate-500">ngày làm việc</span>
+                                </div>
+                                <span className="mt-1 block text-[11px] text-slate-400">
+                                  Hạn sẽ tự chốt khi người xử lý chọn ngày bắt đầu bên Công việc.
+                                </span>
+                              </>
+                            )}
+                          </div>
                         </div>
 
                         <label className="mt-3 block">

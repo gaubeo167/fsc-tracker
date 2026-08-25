@@ -407,7 +407,18 @@ export function TicketDetail({
           </div>
           <Field label="Loại" value={ticket.type === 'BUG' ? vi.ticket.typeBug : vi.ticket.typeFeature} />
           <Field label="Gửi lúc" value={fmt(ticket.createdAt)} />
-          <Field label={vi.list.due} value={fmt(ticket.dueAt)} />
+          {/* Hạn: nói rõ "chưa xác định" thay vì để trống. Phiếu tiếp nhận mà
+              chưa chốt được lịch vẫn phải cho trường biết ước lượng bao lâu. */}
+          <Field
+            label={vi.list.due}
+            value={
+              ticket.dueAt
+                ? fmt(ticket.dueAt)
+                : ticket.estimateDays > 0
+                  ? `Chưa xác định · dự kiến ${ticket.estimateDays} ngày làm việc`
+                  : '—'
+            }
+          />
           {ticket.affectedCampusIds.length > 1 && (
             <Field
               label="Số trường bị ảnh hưởng"
