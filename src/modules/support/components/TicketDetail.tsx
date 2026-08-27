@@ -43,6 +43,7 @@ export function TicketDetail({
   actorUid,
   canResolve = false,
   startEditing = false,
+  triageActions,
 }: {
   ticket: Ticket;
   campusName: string;
@@ -60,6 +61,16 @@ export function TicketDetail({
   canResolve?: boolean;
   /** Vào thẳng chế độ sửa, khi người dùng chọn "Sửa yêu cầu" từ danh sách. */
   startEditing?: boolean;
+  /**
+   * Khe cho các thao tác tiếp nhận (tiếp nhận / hỏi thêm / từ chối).
+   *
+   * Là một khe (slot) chứ không phải cờ bật-tắt: TicketDetail được dựng từ CẢ
+   * HAI phía — màn của trường lẫn màn của PTUD. Nếu component này tự quyết định
+   * khi nào hiện nút tiếp nhận, nó sẽ phải biết vai trò người xem, phạm vi dự
+   * án, danh sách cán bộ, lịch làm việc — tức là kéo nguyên nửa module hỗ trợ
+   * vào một màn vốn chỉ để ĐỌC. Bên gọi biết ngữ cảnh, bên gọi truyền vào.
+   */
+  triageActions?: React.ReactNode;
 }) {
   const [editing, setEditing] = useState(startEditing);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -397,6 +408,14 @@ export function TicketDetail({
             ))}
           </ol>
         )}
+
+        {/* Thao tác tiếp nhận.
+            Vị trí có cân nhắc: SAU thanh tiến trình để tiêu đề và trạng thái
+            phiếu dính liền nhau thành một khối "phiếu này là gì, đang ở đâu";
+            TRƯỚC khối thông tin để người đã đọc từ hàng đợi không phải cuộn
+            hết trang mới thấy nút.
+            Lúc chưa bấm gì nó chỉ là ba cái nút — không chiếm chỗ của nội dung. */}
+        {triageActions && <div className="mt-5">{triageActions}</div>}
 
         <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
           {/* Phân hệ hiện kèm icon giống hệt trong các bảng danh sách — cùng
