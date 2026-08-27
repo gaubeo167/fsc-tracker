@@ -2487,7 +2487,27 @@ const ConfirmationModal = ({
   );
 };
 
-const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void }) => {
+/**
+ * Hai màn dùng chung một bộ dữ liệu: "Tổng quan" và "Dự án".
+ *
+ * Trước đây App render <Dashboard/> cho CẢ HAI mục menu với cùng props, nên
+ * admin/quản lý bấm "Tổng quan" hay "Dự án" đều ra một màn y hệt nhau — menu
+ * hứa hai nơi rồi đưa tới cùng một chỗ.
+ *
+ * Vì sao tách bằng prop chứ không tách thành hai component: cả hai đều cần
+ * projects + toàn bộ tasks + users. Tách đôi là nhân đôi ba listener Firestore
+ * cho cùng một dữ liệu, và người dùng chuyển qua lại giữa hai mục liên tục.
+ *
+ *   overview → số liệu + việc cần chú ý.   KHÔNG có danh sách dự án.
+ *   projects → danh sách + quản lý dự án.  KHÔNG có dãy thẻ số liệu.
+ */
+const Dashboard = ({
+  onSelectProject,
+  variant = 'overview',
+}: {
+  onSelectProject: (id: string) => void;
+  variant?: 'overview' | 'projects';
+}) => {
   const { profile } = useAuth();
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -2578,6 +2598,8 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
   });
 
   const isUser = profile?.role === 'user';
+  const laTongQuan = variant === 'overview';
+  const laDuAn = variant === 'projects';
   const dashboardTasks = allTasks.filter(t => {
     const isProjectVisible = new Set(filteredProjects.map(p => p.id)).has(t.projectId);
     if (!isProjectVisible) return false;
@@ -2673,24 +2695,39 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
     <div className="space-y-10">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Tổng quan hệ thống</h1>
-          <p className="text-slate-500">Chào mừng, {profile?.displayName}. Đây là báo cáo tổng thể dự án FSC.</p>
+          {/* font-semibold thay cho font-bold: thang cân của hệ Apple là
+              300/400/600/700 và tiêu đề nằm ở 600 — xem DESIGN.md §Typography. */}
+          <h1 className="text-3xl font-semibold tracking-[-0.022em] text-slate-900">
+            {laDuAn ? 'Dự án' : 'Tổng quan hệ thống'}
+          </h1>
+          <p className="text-slate-500">
+            {laDuAn
+              ? 'Danh sách dự án, tiến độ và phân công quản lý.'
+              : `Chào mừng, ${profile?.displayName}. Đây là báo cáo tổng thể dự án FSC.`}
+          </p>
         </div>
-        <div className="flex gap-3">
-          {(profile?.role === 'admin' || profile?.role === 'director') && (
-            <Button variant="secondary" onClick={() => setShowHidden(!showHidden)}>
-              {showHidden ? 'Ẩn dự án đóng' : 'Hiện dự án đóng'}
-            </Button>
-          )}
-          {profile?.role === 'admin' && (
-            <Button onClick={() => setIsNewProjectModalOpen(true)}>
-              <Plus size={20} /> Dự án mới
-            </Button>
-          )}
-        </div>
+        {/* Nút thao tác dự án chỉ ở màn Dự án. Để cả ở Tổng quan thì "Dự án mới"
+            đứng cạnh dãy số liệu — một hành động quản trị nằm giữa một bản báo
+            cáo, và đó chính là thứ khiến hai màn trông như một. */}
+        {laDuAn && (
+          <div className="flex gap-3">
+            {(profile?.role === 'admin' || profile?.role === 'director') && (
+              <Button variant="secondary" onClick={() => setShowHidden(!showHidden)}>
+                {showHidden ? 'Ẩn dự án đóng' : 'Hiện dự án đóng'}
+              </Button>
+            )}
+            {profile?.role === 'admin' && (
+              <Button onClick={() => setIsNewProjectModalOpen(true)}>
+                <Plus size={20} /> Dự án mới
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Stats Dashboard */}
+      {/* Dãy thẻ số liệu — CHỈ ở Tổng quan. Đây là thứ trả lời "hệ thống đang
+          thế nào", không phải thứ giúp quản lý một dự án cụ thể. */}
+      {laTongQuan && (
       <div className={cn("grid gap-4", isUser ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-6" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-5")}>
         {isUser ? (
           // User Dashboard Stats
@@ -2736,7 +2773,13 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
           ))
         )}
       </div>
+      )}
 
+      {/* Khối nội dung chính. Tổng quan chỉ dựng khối này cho role=user (họ
+          không có mục "Dự án" trong menu nên đây là chỗ duy nhất thấy việc của
+          mình); màn Dự án dựng danh sách dự án. Quản lý/admin ở Tổng quan
+          không dựng gì ở đây — bảng "cần chú ý" bên dưới lo phần đó. */}
+      {((isUser && laTongQuan) || (!isUser && laDuAn)) && (
       <div className="grid grid-cols-1 gap-8">
         {isUser ? (
           // User Task List View
@@ -2775,13 +2818,12 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
           </div>
         ) : (
           // Manager/Admin Project List View
+          //
+          // Bỏ tiêu đề phụ "Danh sách dự án": nó từng cần thiết khi khối này nằm
+          // lẫn giữa dãy số liệu và bảng công việc trên cùng một màn. Nay nó là
+          // nội dung DUY NHẤT của màn Dự án, đứng ngay dưới h1 "Dự án" — nhắc
+          // lại đúng một điều hai lần liền nhau.
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <Briefcase size={20} className="text-indigo-600" />
-                Danh sách dự án
-              </h2>
-            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredProjects.map((project) => {
                 const projectTasks = allTasks.filter(t => t.projectId === project.id);
@@ -2887,6 +2929,7 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
           </div>
         )}
       </div>
+      )}
 
       <ConfirmationModal 
         isOpen={!!projectToDelete}
@@ -2905,8 +2948,14 @@ const Dashboard = ({ onSelectProject }: { onSelectProject: (id: string) => void 
         </div>
       )}
 
-      {/* Task List Table (Only for Admin/Director/Manager) */}
-      {!isUser && (
+      {/* Bảng việc cần chú ý — quản lý/admin, CHỈ ở Tổng quan.
+          Đây là thứ thay chỗ danh sách dự án vừa dọn đi: Tổng quan giờ trả lời
+          "có gì đang cháy", còn "dự án nào đang chạy" là câu hỏi của màn Dự án.
+
+          Các modal bên dưới (xoá/tạo/sửa dự án) cố ý KHÔNG gán cờ variant: chúng
+          chỉ mở được từ thẻ dự án, mà thẻ dự án nay chỉ có ở màn Dự án — ở Tổng
+          quan chúng đứng im, không dựng ra gì. */}
+      {!isUser && laTongQuan && (
         <div className="space-y-4 mt-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
@@ -5631,8 +5680,12 @@ function AuthConsumer({
             </div>
           ) : (
             <div className="p-4 lg:p-8 max-w-7xl mx-auto">
-              {effectiveNav === 'dashboard' && <Dashboard onSelectProject={setCurrentProjectId} />}
-              {effectiveNav === 'projects' && <Dashboard onSelectProject={setCurrentProjectId} />}
+              {effectiveNav === 'dashboard' && (
+                <Dashboard onSelectProject={setCurrentProjectId} variant="overview" />
+              )}
+              {effectiveNav === 'projects' && (
+                <Dashboard onSelectProject={setCurrentProjectId} variant="projects" />
+              )}
               {effectiveNav === 'tasks' && (
                 <MyTasksView openTaskId={openTaskId} onOpened={() => setOpenTaskId(null)} />
               )}
