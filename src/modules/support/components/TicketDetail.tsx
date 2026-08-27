@@ -7,7 +7,7 @@ import {
 } from '../repository/ticketRepository';
 import { EditTicketPanel } from './forms/EditTicketPanel';
 import { Badge, Button, Card, cn } from '../../../components/ui';
-import { ICON, ModuleCell } from '../ui/tokens';
+import { ICON, ModuleCell, TypeBadge } from '../ui/tokens';
 import { vi } from '../i18n/vi';
 import { DomainError, type Ticket } from '../types';
 
@@ -402,10 +402,16 @@ export function TicketDetail({
           {/* Phân hệ hiện kèm icon giống hệt trong các bảng danh sách — cùng
               một khái niệm thì phải mang cùng một hình ở mọi màn. */}
           <div>
-            <dt className="text-[11px] uppercase tracking-wide text-slate-400">Phân hệ</dt>
+            <dt className="text-[13px] tracking-[-0.01em] text-slate-400">Phân hệ</dt>
             <dd className="mt-0.5"><ModuleCell code={ticket.moduleId} /></dd>
           </div>
-          <Field label="Loại" value={ticket.type === 'BUG' ? vi.ticket.typeBug : vi.ticket.typeFeature} />
+          {/* Nhãn có màu thay cho chữ trần: đây là trường quyết định phiếu có
+              hạn hoàn thành theo SLA hay không (§7 — đề xuất chỉ có SLA phản
+              hồi), nên nó phải nhìn ra ngay giữa một khối chữ xám. */}
+          <div>
+            <dt className="text-[13px] tracking-[-0.01em] text-slate-400">Loại</dt>
+            <dd className="mt-1"><TypeBadge type={ticket.type} /></dd>
+          </div>
           <Field label="Gửi lúc" value={fmt(ticket.createdAt)} />
           {/* Hạn: nói rõ "chưa xác định" thay vì để trống. Phiếu tiếp nhận mà
               chưa chốt được lịch vẫn phải cho trường biết ước lượng bao lâu. */}
@@ -703,8 +709,10 @@ function AttachmentGallery({ paths }: { paths: Ticket['attachments'] }) {
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs text-slate-400">{label}</dt>
-      <dd className="mt-0.5 font-medium text-slate-800">{value}</dd>
+      {/* Cùng một kiểu nhãn với hai <dt> viết tay ở khối trên — trước đây khối
+          này có BA kiểu nhãn khác nhau đứng cạnh nhau trong cùng một <dl>. */}
+      <dt className="text-[13px] tracking-[-0.01em] text-slate-400">{label}</dt>
+      <dd className="mt-1 font-semibold text-slate-800">{value}</dd>
     </div>
   );
 }

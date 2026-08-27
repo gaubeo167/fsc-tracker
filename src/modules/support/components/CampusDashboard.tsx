@@ -7,9 +7,9 @@ import { Button, Card, StateBlock, cn } from '../../../components/ui';
 import { vi } from '../i18n/vi';
 import type { RepoError } from '../repository/campusRepository';
 import { canCampusEdit, deleteTicket } from '../repository/ticketRepository';
-import { DomainError, type Ticket } from '../types';
+import { DomainError, type Ticket, type TicketType } from '../types';
 import {
-  DONE_STATUSES, ICON, ModuleCell, OPEN_STATUSES, StatusBadge, TypeIcon,
+  DONE_STATUSES, ICON, ModuleCell, OPEN_STATUSES, StatusBadge, TypeBadge, TypeFilterChips,
   fmtDateFull, fmtTime,
 } from '../ui/tokens';
 
@@ -276,6 +276,7 @@ export function CampusDashboard({
   onToast?: Toast;
 }) {
   const [filter, setFilter] = useState<FilterId>('all');
+  const [loaiLoc, setLoaiLoc] = useState<'all' | TicketType>('all');
   const [sort, setSort] = useState<SortId>('newest');
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
@@ -300,6 +301,27 @@ export function CampusDashboard({
     : id === 'done' ? stats.done
     : stats.overdue;
 
+  // Đếm theo loại: tính trên kết quả của bộ lọc TRẠNG THÁI, chưa qua ô tìm
+  // kiếm. Đưa cả từ khoá vào thì mỗi lần gõ một chữ con số lại nhảy, và người
+  // dùng không biết số đó đang nói về cái gì.
+  const demTheoLoai = useMemo(() => {
+    const now = Date.now();
+    let list = tickets;
+    switch (filter) {
+      case 'open': list = list.filter((t) => OPEN_STATUSES.includes(t.status)); break;
+      case 'needs_info': list = list.filter((t) => t.status === 'NEEDS_INFO'); break;
+      case 'done': list = list.filter((t) => DONE_STATUSES.includes(t.status)); break;
+      case 'overdue':
+        list = list.filter((t) => t.dueAt && t.dueAt < now && OPEN_STATUSES.includes(t.status));
+        break;
+    }
+    return {
+      all: list.length,
+      BUG: list.filter((t) => t.type === 'BUG').length,
+      FEATURE_REQUEST: list.filter((t) => t.type === 'FEATURE_REQUEST').length,
+    };
+  }, [tickets, filter]);
+
   const shown = useMemo(() => {
     const now = Date.now();
     let list = tickets;
@@ -311,6 +333,10 @@ export function CampusDashboard({
         list = list.filter((t) => t.dueAt && t.dueAt < now && OPEN_STATUSES.includes(t.status));
         break;
     }
+
+    // Lọc theo LOẠI yêu cầu. Đặt sau bộ lọc trạng thái và trước ô tìm kiếm:
+    // ba trục độc lập, chồng lên nhau theo đúng thứ tự người dùng thu hẹp dần.
+    if (loaiLoc !== 'all') list = list.filter((t) => t.type === loaiLoc);
 
     // Tìm không dấu: người gõ "khong dang nhap" phải ra được phiếu "Không đăng
     // nhập". Bỏ dấu cả hai vế mới khớp — đây là mặc định của người dùng Việt.
@@ -330,7 +356,7 @@ export function CampusDashboard({
       sorted.sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
     }
     return sorted;
-  }, [tickets, filter, q, sort]);
+  }, [tickets, filter, loaiLoc, q, sort]);
 
   // Đổi bộ lọc / từ khoá mà vẫn đứng ở trang 3 thì màn hình trống trơn.
   useEffect(() => { setPage(1); }, [filter, q, sort, pageSize]);
@@ -408,6 +434,13 @@ export function CampusDashboard({
             ))}
           </div>
 
+          {/* Lọc theo loại yêu cầu. Phía trường cũng cần: người gửi phiếu hay
+              hỏi "cái đề xuất tôi gửi tháng trước tới đâu rồi" — không tách
+              được loại thì phải dò cả danh sách. */}
+          {demTheoLoai.BUG > 0 && demTheoLoai.FEATURE_REQUEST > 0 && (
+            <TypeFilterChips value={loaiLoc} onChange={setLoaiLoc} counts={demTheoLoai} className="pb-1" />
+          )}
+
           <div className="flex flex-wrap items-center gap-2 pb-2">
             <select
               value={sort}
@@ -484,7 +517,7 @@ export function CampusDashboard({
                           Tạo lúc: {fmtDateFull(t.createdAt)} {fmtTime(t.createdAt)}
                         </span>
                       </td>
-                      <td className="px-3 py-3 align-top"><TypeIcon type={t.type} size={ICON.lg} /></td>
+                      <td className="px-3 py-3 align-top"><TypeBadge type={t.type} /></td>
                       <td className="max-w-md px-3 py-3 align-top">
                         <span className="line-clamp-1 text-sm font-semibold text-slate-900">{t.title}</span>
                         {t.description && (
@@ -516,7 +549,7 @@ export function CampusDashboard({
                 <li key={t.id}>
                   <button onClick={() => onOpen(t)} className="w-full px-4 py-3 text-left">
                     <div className="flex flex-wrap items-center gap-2">
-                      <TypeIcon type={t.type} size={ICON.md} />
+                      <TypeBadge type={t.type} />
                       <span className="font-mono text-[11px] font-semibold tabular-nums text-slate-600">
                         {t.ticketNo}
                       </span>

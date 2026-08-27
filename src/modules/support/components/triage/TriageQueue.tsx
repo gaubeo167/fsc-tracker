@@ -13,7 +13,7 @@ import {
 } from '../../repository/userAdminRepository';
 import { addWorkingMs, type WorkingCalendar } from '../../services/workingTime';
 import { useWorkingCalendar } from '../../hooks/useWorkingCalendar';
-import { StatusBadge, TypeIcon } from '../../ui/tokens';
+import { StatusBadge, TypeBadge, TypeFilterChips } from '../../ui/tokens';
 import { findPolicy } from '../../services/slaCalculator';
 import { useSupportModules } from '../../hooks/useSupportModules';
 import { useCampuses } from '../../hooks/useCampuses';
@@ -21,6 +21,7 @@ import { TicketDetail } from '../TicketDetail';
 import {
   DomainError,
   type SupportModuleCode, type SupportModuleConfig, type Ticket, type TicketPriority,
+  type TicketType,
 } from '../../types';
 
 // ===========================================================================
@@ -160,6 +161,9 @@ export function TriageQueue({
   // quan trọng nhất (các bước tái hiện, kết quả mong đợi/thực tế, ảnh đính kèm,
   // lịch sử trao đổi) đều nằm ngoài phần cắt đó.
   const [openDetail, setOpenDetail] = useState<Ticket | null>(null);
+  // Lọc theo loại yêu cầu. Mặc định 'all' — người trực cần thấy toàn bộ việc
+  // tồn trước, rồi mới chủ động thu hẹp.
+  const [loaiLoc, setLoaiLoc] = useState<'all' | TicketType>('all');
   const { nameOf: tenPhanHe } = useSupportModules();
   // Danh bạ đơn vị: đổi mã trường ("FCG") thành tên người đọc hiểu được.
   const { nameOf: tenDonVi, campusOf } = useCampuses();
@@ -178,6 +182,23 @@ export function TriageQueue({
   const moduleById = useMemo(
     () => Object.fromEntries((modules ?? []).map((m) => [m.code, m])),
     [modules]
+  );
+
+  // Đếm theo loại — tính trên TOÀN BỘ hàng đợi, không phải trên danh sách đã
+  // lọc. Đếm sau khi lọc thì nút "Báo lỗi" luôn hiện đúng số phiếu đang xem và
+  // hai nút kia về 0, tức là con số mất hết ý nghĩa.
+  const demTheoLoai = useMemo(() => {
+    const ds = tickets ?? [];
+    return {
+      all: ds.length,
+      BUG: ds.filter((t) => t.type === 'BUG').length,
+      FEATURE_REQUEST: ds.filter((t) => t.type === 'FEATURE_REQUEST').length,
+    };
+  }, [tickets]);
+
+  const phieuHienThi = useMemo(
+    () => (tickets ?? []).filter((t) => loaiLoc === 'all' || t.type === loaiLoc),
+    [tickets, loaiLoc]
   );
 
   const reload = useCallback(async () => {
@@ -392,12 +413,31 @@ export function TriageQueue({
         </div>
       </div>
 
+      {/* Lọc theo loại. Chỉ hiện khi hàng đợi có CẢ HAI loại: một dải nút mà
+          bấm loại nào cũng ra cùng một danh sách là chrome thừa. */}
+      {demTheoLoai.BUG > 0 && demTheoLoai.FEATURE_REQUEST > 0 && (
+        <TypeFilterChips value={loaiLoc} onChange={setLoaiLoc} counts={demTheoLoai} />
+      )}
+
       <Card>
         {tickets.length === 0 ? (
           <StateBlock
             kind="empty"
             title="Không có phiếu nào chờ tiếp nhận"
             description="Mọi yêu cầu thuộc phân hệ bạn phụ trách đều đã được xử lý."
+          />
+        ) : phieuHienThi.length === 0 ? (
+          // Rỗng vì BỘ LỌC, không phải vì hết việc — nói rõ, kèm lối thoát.
+          // Gộp hai trạng thái này làm người trực tưởng đã xong việc.
+          <StateBlock
+            kind="empty"
+            title={`Không có phiếu ${loaiLoc === 'BUG' ? 'báo lỗi' : 'đề xuất tính năng'} nào đang chờ`}
+            description="Hàng đợi vẫn còn phiếu thuộc loại khác."
+            action={
+              <Button size="sm" variant="outline" onClick={() => setLoaiLoc('all')}>
+                Xem tất cả {demTheoLoai.all} phiếu
+              </Button>
+            }
           />
         ) : (
           <>
@@ -406,7 +446,12 @@ export function TriageQueue({
             <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-5 py-3">
               <span className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.016em] text-slate-700">
                 <Inbox size={ICON.lg} className="text-slate-400" />
-                {tickets.length} phiếu chờ tiếp nhận
+                {phieuHienThi.length} phiếu chờ tiếp nhận
+                {loaiLoc !== 'all' && (
+                  <span className="font-normal text-slate-400">
+                    · đang lọc {loaiLoc === 'BUG' ? 'báo lỗi' : 'đề xuất tính năng'}
+                  </span>
+                )}
               </span>
               <Button size="sm" variant="outline" onClick={() => setCollapsed((v) => !v)}>
                 {collapsed ? <>Mở rộng <ChevronDown size={ICON.md} /></>
@@ -414,7 +459,7 @@ export function TriageQueue({
               </Button>
             </div>
             <ul className={cn('divide-y divide-slate-100', collapsed && 'hidden')}>
-              {tickets.map((t) => {
+              {phieuHienThi.map((t) => {
                 const d = draftOf(t);
                 const cfg = moduleById[t.moduleId];
                 const noProject = !cfg?.projectId;
@@ -458,7 +503,10 @@ export function TriageQueue({
                       className="group -mx-2 cursor-pointer rounded-md px-2 py-1 transition-colors hover:bg-slate-50"
                     >
                       <div className="flex flex-wrap items-center gap-2">
-                        <TypeIcon type={t.type} size={ICON.lg} />
+                        {/* Nhãn CÓ CHỮ, đứng đầu hàng. Loại yêu cầu quyết định
+                            phiếu có hạn xử lý hay không, nên nó phải đọc được
+                            ngay chứ không nằm sau một con bọ 18px. */}
+                        <TypeBadge type={t.type} />
                         <span className="rounded-xs bg-slate-100 px-2 py-0.5 font-mono text-[12px] font-semibold tabular-nums text-slate-600">
                           {t.ticketNo}
                         </span>

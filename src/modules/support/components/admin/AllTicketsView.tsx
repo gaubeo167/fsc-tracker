@@ -2,13 +2,14 @@ import { Filter, Inbox } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Badge, Card, StateBlock, cn } from '../../../../components/ui';
 import {
-  DueCell, ICON, ModuleCell, OPEN_STATUSES, PriorityBadge, StatusBadge, TABLE, TypeIcon,
+  DueCell, ICON, ModuleCell, OPEN_STATUSES, PriorityBadge, StatusBadge, TABLE, TypeBadge,
+  TypeFilterChips,
 } from '../../ui/tokens';
 import { vi } from '../../i18n/vi';
 import { watchCampuses, type RepoError } from '../../repository/campusRepository';
 import { fetchAllTickets } from '../../repository/ticketRepository';
 import { TicketDetail } from '../TicketDetail';
-import type { Campus, Ticket, TicketStatus } from '../../types';
+import type { Campus, Ticket, TicketStatus, TicketType } from '../../types';
 import { useSupportModules } from '../../hooks/useSupportModules';
 import { useOpenTicketEvent } from '../../hooks/useOpenTicketEvent';
 
@@ -44,6 +45,7 @@ export function AllTicketsView({
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [filter, setFilter] = useState('open');
   const [moduleFilter, setModuleFilter] = useState('');
+  const [loaiLoc, setLoaiLoc] = useState<'all' | TicketType>('all');
   // Kể cả phân hệ đã tắt: phiếu cũ của nó vẫn phải lọc ra xem được.
   const phanHe = useSupportModules().modules;
   const [open, setOpen] = useState<Ticket | null>(null);
@@ -73,9 +75,23 @@ export function AllTicketsView({
     [campuses]
   );
 
-  const shown = useMemo(
+  // Đếm theo loại tính SAU bộ lọc phân hệ, TRƯỚC bộ lọc loại: admin đang xem
+  // riêng một phân hệ thì con số phải là của phân hệ đó, không phải của toàn hệ
+  // thống — nếu không, bấm "Báo lỗi (12)" mà chỉ ra 3 dòng.
+  const theoPhanHe = useMemo(
     () => (tickets ?? []).filter((t) => !moduleFilter || t.moduleId === moduleFilter),
     [tickets, moduleFilter]
+  );
+
+  const demTheoLoai = useMemo(() => ({
+    all: theoPhanHe.length,
+    BUG: theoPhanHe.filter((t) => t.type === 'BUG').length,
+    FEATURE_REQUEST: theoPhanHe.filter((t) => t.type === 'FEATURE_REQUEST').length,
+  }), [theoPhanHe]);
+
+  const shown = useMemo(
+    () => theoPhanHe.filter((t) => loaiLoc === 'all' || t.type === loaiLoc),
+    [theoPhanHe, loaiLoc]
   );
 
   if (open) {
@@ -118,6 +134,11 @@ export function AllTicketsView({
           ))}
         </select>
       </div>
+
+      {/* Lọc theo loại yêu cầu — trục độc lập với trạng thái và phân hệ. */}
+      {demTheoLoai.BUG > 0 && demTheoLoai.FEATURE_REQUEST > 0 && (
+        <TypeFilterChips value={loaiLoc} onChange={setLoaiLoc} counts={demTheoLoai} />
+      )}
 
       <Card>
         {tickets === null ? (
@@ -167,7 +188,7 @@ export function AllTicketsView({
                     <td className={cn(TABLE.cell, 'whitespace-nowrap font-mono text-[11px] tabular-nums text-slate-500')}>
                       {t.ticketNo}
                     </td>
-                    <td className={TABLE.cell}><TypeIcon type={t.type} size={ICON.md} /></td>
+                    <td className={TABLE.cell}><TypeBadge type={t.type} /></td>
                     {/* Cột trường là thứ admin cần nhất: nhìn ra ngay lỗi nào
                         đang lan ra nhiều trường. */}
                     <td className={cn(TABLE.cell, 'whitespace-nowrap')}>

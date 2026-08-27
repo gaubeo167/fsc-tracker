@@ -107,7 +107,16 @@
   --color-sky-600: #0f7fb5;
   --color-sky-700: #0b6491;
 
+  /* Tím hệ thống Apple — màu của "đề xuất tính năng".
+     Phải là một sắc RIÊNG, không mượn indigo: sau khi indigo-* thành Action
+     Blue thì icon đề xuất trùng đúng màu của mọi nút và mọi link trong app,
+     tức là mất hẳn khả năng nhận diện. */
+  --color-violet-50: #faf4fe;
+  --color-violet-100: #f0e0fb;
+  --color-violet-200: #e2c4f6;
   --color-violet-500: #af52de; /* Apple system purple */
+  --color-violet-600: #8e3cb8;
+  --color-violet-700: #722f93;
   --color-rose-500: #ff2d55;   /* Apple system pink */
 
   /* --- Token gọi tên trực tiếp ----------------------------------------

@@ -2,7 +2,7 @@ import { AlertCircle, AlertTriangle, Building2, CalendarDays, ChevronDown, Chevr
 import React, { useState } from 'react';
 import { Button, cn } from '../../../components/ui';
 import { FLAG_THRESHOLD } from '../services/duplicateScorer';
-import { ICON, StatusBadge, TypeIcon, fmtDateTime } from '../ui/tokens';
+import { ICON, StatusBadge, TypeBadge, fmtDateTime } from '../ui/tokens';
 import type { DuplicateCandidate } from '../hooks/useDuplicateCheck';
 
 // ===========================================================================
@@ -43,7 +43,10 @@ function CandidateCard({
   return (
     <div className="bg-white p-3">
       <div className="flex flex-wrap items-center gap-2">
-        {item.type && <TypeIcon type={item.type} size={ICON.sm} />}
+        {/* Nhãn có chữ, không phải icon trần: người đang gửi phiếu cần biết
+            cái "có thể trùng" kia là LỖI hay ĐỀ XUẤT thì mới quyết được là
+            bấm "tôi cũng bị" hay bỏ qua. Hàng này flex-wrap nên không chật. */}
+        {item.type && <TypeBadge type={item.type} />}
         <span className="font-mono text-[10px] font-bold text-slate-500">{item.ticketNo}</span>
         <StatusBadge status={item.status} />
         <span

@@ -3,14 +3,14 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge, Card, StateBlock, cn } from '../../../../components/ui';
 import {
   DONE_STATUSES as DONE, DueCell, ICON, ModuleCell, OPEN_STATUSES as OPEN, PriorityBadge,
-  StatusBadge, TABLE, TypeIcon,
+  StatusBadge, TABLE, TypeBadge, TypeFilterChips,
 } from '../../ui/tokens';
 import { vi } from '../../i18n/vi';
 import type { RepoError } from '../../repository/campusRepository';
 import { fetchAllTickets } from '../../repository/ticketRepository';
 import { fetchMyTriageScope } from '../../repository/userAdminRepository';
 import { TicketDetail } from '../TicketDetail';
-import type { Ticket } from '../../types';
+import type { Ticket, TicketType } from '../../types';
 import { useSupportModules } from '../../hooks/useSupportModules';
 import { useOpenTicketEvent } from '../../hooks/useOpenTicketEvent';
 import { useCampuses } from '../../hooks/useCampuses';
@@ -45,6 +45,7 @@ export function MyModuleTickets({
   const [error, setError] = useState<RepoError | null>(null);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['id']>('open');
   const [open, setOpen] = useState<Ticket | null>(null);
+  const [loaiLoc, setLoaiLoc] = useState<'all' | TicketType>('all');
 
   const load = useCallback(async () => {
     const [sc, all] = await Promise.all([
@@ -69,9 +70,23 @@ export function MyModuleTickets({
     [tickets, myModuleCodes]
   );
 
-  const shown = useMemo(
+  // Lọc trạng thái trước, rồi mới tới loại. Đếm theo loại phải tính trên kết
+  // quả của bộ lọc trạng thái — nếu tính trên `mine` thì đang xem "Đang mở" mà
+  // nút lại đếm cả phiếu đã đóng, hai con số cãi nhau ngay trên một màn.
+  const theoTrangThai = useMemo(
     () => mine.filter(FILTERS.find((f) => f.id === filter)!.match),
     [mine, filter]
+  );
+
+  const demTheoLoai = useMemo(() => ({
+    all: theoTrangThai.length,
+    BUG: theoTrangThai.filter((t) => t.type === 'BUG').length,
+    FEATURE_REQUEST: theoTrangThai.filter((t) => t.type === 'FEATURE_REQUEST').length,
+  }), [theoTrangThai]);
+
+  const shown = useMemo(
+    () => theoTrangThai.filter((t) => loaiLoc === 'all' || t.type === loaiLoc),
+    [theoTrangThai, loaiLoc]
   );
 
   if (open) {
@@ -130,6 +145,13 @@ export function MyModuleTickets({
         ))}
       </div>
 
+      {/* Tầng lọc thứ hai: theo LOẠI yêu cầu. Đứng riêng khỏi dải lọc trạng
+          thái bên trên vì hai trục độc lập nhau — "đang mở" và "báo lỗi" chọn
+          được cùng lúc. Gộp chung một dải thì bấm cái này mất cái kia. */}
+      {demTheoLoai.BUG > 0 && demTheoLoai.FEATURE_REQUEST > 0 && (
+        <TypeFilterChips value={loaiLoc} onChange={setLoaiLoc} counts={demTheoLoai} />
+      )}
+
       <Card>
         {shown.length === 0 ? (
           <StateBlock
@@ -166,7 +188,7 @@ export function MyModuleTickets({
                     <td className={cn(TABLE.cell, 'whitespace-nowrap font-mono text-[11px] tabular-nums text-slate-500')}>
                       {t.ticketNo}
                     </td>
-                    <td className={TABLE.cell}><TypeIcon type={t.type} size={ICON.md} /></td>
+                    <td className={TABLE.cell}><TypeBadge type={t.type} /></td>
                     <td className={cn(TABLE.cell, 'whitespace-nowrap')}>
                       <Badge variant="neutral">{t.campusId}</Badge>
                     </td>

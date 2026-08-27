@@ -91,10 +91,43 @@ export const TICKET_PRIORITY: Record<TicketPriority, { label: string; full: stri
   P4: { label: 'P4', full: 'P4 — Thấp (Low)', variant: 'neutral' },
 };
 
-/** Loại phiếu: icon + màu. Bug đỏ, đề xuất tím — nhất quán ở mọi màn. */
-export const TICKET_TYPE: Record<TicketType, { label: string; Icon: typeof Bug; className: string }> = {
-  BUG: { label: 'Báo lỗi', Icon: Bug, className: 'text-red-500' },
-  FEATURE_REQUEST: { label: 'Đề xuất', Icon: Lightbulb, className: 'text-indigo-500' },
+/**
+ * Loại phiếu: nhãn + icon + màu.
+ *
+ * Hai loại này KHÁC NHAU VỀ NGHIỆP VỤ, không chỉ khác nhãn:
+ *
+ *   BÁO LỖI  — hệ thống đang chạy sai. Có SLA hoàn thành theo mức ưu tiên,
+ *              có hạn xử lý, đo được là trễ hay đúng hạn.
+ *   ĐỀ XUẤT  — hệ thống chạy đúng, người dùng muốn thêm chức năng. §7 spec:
+ *              KHÔNG có SLA hoàn thành, chỉ có SLA phản hồi 3 ngày làm việc,
+ *              rồi xếp vào kế hoạch theo quý.
+ *
+ * Trộn hai loại vào cùng một hàng đợi mà không phân biệt được bằng mắt dẫn tới
+ * hai hậu quả ngược nhau: đề xuất bị hối như lỗi, và lỗi bị hoãn như đề xuất.
+ *
+ * `full` là nhãn đầy đủ cho màn chi tiết và tooltip; `label` là bản ngắn cho
+ * danh sách, nơi chiều ngang là thứ đắt nhất.
+ */
+export const TICKET_TYPE: Record<
+  TicketType,
+  { label: string; full: string; Icon: typeof Bug; className: string; badge: string }
+> = {
+  BUG: {
+    label: 'Báo lỗi',
+    full: 'Báo lỗi — hệ thống đang chạy sai',
+    Icon: Bug,
+    className: 'text-red-500',
+    badge: 'bg-red-50 text-red-600',
+  },
+  FEATURE_REQUEST: {
+    label: 'Đề xuất tính năng',
+    full: 'Đề xuất tính năng mới — không có hạn hoàn thành theo SLA',
+    Icon: Lightbulb,
+    // Tím hệ thống Apple. KHÔNG dùng indigo: sau khi áp DESIGN.md, indigo-*
+    // chính là Action Blue của mọi nút và link — icon sẽ chìm vào chrome.
+    className: 'text-violet-500',
+    badge: 'bg-violet-50 text-violet-700',
+  },
 };
 
 /**
@@ -144,11 +177,90 @@ export function PriorityBadge({ priority }: { priority: TicketPriority }) {
   return <span title={p.full}><Badge variant={p.variant}>{p.label}</Badge></span>;
 }
 
-export function TypeIcon({ type, size = ICON.sm }: { type: TicketType; size?: number }) {
+/**
+ * Nhãn loại phiếu CÓ CHỮ. Cách DUY NHẤT để hiện loại phiếu.
+ *
+ * Thay cho TypeIcon (icon trần) vốn dùng ở mọi danh sách trước đây. Icon trần
+ * bắt người đọc phải BIẾT TRƯỚC quy ước "con bọ đỏ = lỗi, bóng đèn = đề xuất".
+ * Người mới vào ca trực không biết quy ước đó, và ngay cả người biết rồi thì ở
+ * cỡ 16px con bọ với bóng đèn là hai đốm màu na ná nhau. Trong khi loại phiếu
+ * quyết định phiếu CÓ HẠN XỬ LÝ HAY KHÔNG — quá quan trọng để phó mặc cho một
+ * đốm màu.
+ *
+ * TypeIcon đã bị xoá thay vì để đó: giữ lại một lối tắt "chỉ hiện icon" là
+ * đảm bảo màn tiếp theo ai đó viết sẽ lại dùng nó, và vấn đề quay lại.
+ */
+export function TypeBadge({ type, className }: { type: TicketType; className?: string }) {
   const t = TICKET_TYPE[type];
-  // aria-label bắt buộc: icon đứng một mình không có chữ đi kèm thì trình đọc
-  // màn hình không đọc được gì.
-  return <t.Icon size={size} className={t.className} aria-label={t.label} />;
+  return (
+    <span
+      title={t.full}
+      className={cn(
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5',
+        'text-[12px] font-semibold tracking-[-0.01em]',
+        t.badge,
+        className
+      )}
+    >
+      <t.Icon size={ICON.xs} aria-hidden />
+      {t.label}
+    </span>
+  );
+}
+
+/** Thứ tự cố định của bộ lọc loại. Khai một chỗ để mọi màn lọc giống nhau. */
+export const TYPE_FILTERS: Array<{ id: 'all' | TicketType; label: string }> = [
+  { id: 'all', label: 'Tất cả loại' },
+  { id: 'BUG', label: 'Báo lỗi' },
+  { id: 'FEATURE_REQUEST', label: 'Đề xuất tính năng' },
+];
+
+/**
+ * Dải nút lọc theo loại phiếu, kèm số đếm.
+ *
+ * Có nhãn rồi vẫn cần lọc: nhãn trả lời "phiếu NÀY là loại gì", còn lọc trả
+ * lời "hôm nay còn bao nhiêu lỗi chưa xử lý" — hai câu hỏi khác nhau, và câu
+ * thứ hai là câu người trực hỏi mỗi sáng. Số đếm nằm ngay trên nút để trả lời
+ * mà không phải bấm.
+ */
+export function TypeFilterChips({
+  value, onChange, counts, className,
+}: {
+  value: 'all' | TicketType;
+  onChange: (v: 'all' | TicketType) => void;
+  /** Số phiếu mỗi loại, tính TRƯỚC khi lọc theo loại. */
+  counts: { all: number; BUG: number; FEATURE_REQUEST: number };
+  className?: string;
+}) {
+  return (
+    <div className={cn('flex flex-wrap items-center gap-2', className)} role="group" aria-label="Lọc theo loại yêu cầu">
+      {TYPE_FILTERS.map((f) => {
+        const dang = value === f.id;
+        const mau = f.id === 'BUG' ? 'text-red-600' : f.id === 'FEATURE_REQUEST' ? 'text-violet-700' : 'text-slate-600';
+        return (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => onChange(f.id)}
+            aria-pressed={dang}
+            className={cn(
+              // Viên nang — trong ngữ pháp Apple, bo tròn hoàn toàn LÀ tín hiệu
+              // "bấm được". Xem DESIGN.md §Shapes.
+              'rounded-full px-3.5 py-1.5 text-[14px] tracking-[-0.016em] transition-colors active:scale-95',
+              dang
+                ? 'bg-slate-900 font-semibold text-white'
+                : cn('bg-white border border-slate-200 hover:bg-slate-50', mau)
+            )}
+          >
+            {f.label}
+            <span className={cn('ml-1.5 tabular-nums', dang ? 'text-white/70' : 'text-slate-400')}>
+              {counts[f.id]}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 /** Ngày giờ theo giờ Việt Nam. Gom một chỗ để mọi màn hiện cùng định dạng. */
