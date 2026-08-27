@@ -119,7 +119,7 @@ export function ModuleCell({ code }: { code: string }) {
   // mã thô.
   const name = useSupportModules().nameOf(code);
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+    <span className="inline-flex items-center gap-1.5 text-[14px] tracking-[-0.016em] text-slate-600">
       <m.Icon size={ICON.md} className={cn('shrink-0', m.className)} aria-hidden />
       <span className="truncate">{name}</span>
     </span>
@@ -190,19 +190,22 @@ export function DueCell({
   if (!dueAt) {
     return estimateDays > 0
       ? (
-        <span className="text-xs text-slate-500" title={`Dự kiến ${estimateDays} ngày làm việc kể từ khi bắt đầu xử lý`}>
+        <span className="text-[14px] tracking-[-0.016em] text-slate-500" title={`Dự kiến ${estimateDays} ngày làm việc kể từ khi bắt đầu xử lý`}>
           Chưa xác định
         </span>
       )
-      : <span className="text-xs text-slate-300">—</span>;
+      : <span className="text-[14px] text-slate-300">—</span>;
   }
   return (
     <span
       className={cn(
         // Số dùng tabular-nums: cột ngày trong bảng không bị nhảy khi chữ số
         // rộng khác nhau.
-        'inline-flex items-center gap-1 text-xs tabular-nums',
-        overdue ? 'font-bold text-red-600' : 'text-slate-500'
+        'inline-flex items-center gap-1 text-[14px] tabular-nums tracking-[-0.016em]',
+        // Cân 600, không phải 700: thang cân của Apple là 300/400/600/700 và
+        // 700 dành riêng cho tagline. Quá hạn đã có màu đỏ + icon cảnh báo,
+        // không cần cân đậm nhất hệ để nói thêm lần thứ ba.
+        overdue ? 'font-semibold text-red-600' : 'text-slate-500'
       )}
     >
       {overdue && <AlertTriangle size={ICON.xs} />}
@@ -218,10 +221,14 @@ export const OPEN_STATUSES: TicketStatus[] = [
 export const DONE_STATUSES: TicketStatus[] = ['RESOLVED', 'PENDING_VERIFICATION', 'CLOSED'];
 
 /** Lớp dùng chung cho bảng danh sách — giữ mọi bảng giống hệt nhau. */
+// Hàng tiêu đề bỏ `uppercase tracking-wide`: chữ hoa giãn ly không thuộc hệ
+// Apple, và nhãn cột tiếng Việt có dấu bị ép hoa thì mất dấu, khó đọc. Thay
+// bằng 13px cân 600 tracking âm — vẫn tách khỏi thân bảng, nhưng bằng cân chữ
+// chứ không bằng cách bóp méo chữ.
 export const TABLE = {
   wrapper: 'w-full text-left',
-  headRow: 'border-b border-slate-100 text-[11px] uppercase tracking-wide text-slate-400',
-  headCell: 'px-3 py-2.5 font-medium first:pl-4 last:pr-4',
-  row: 'cursor-pointer border-b border-slate-50 transition-colors last:border-0 hover:bg-slate-50',
-  cell: 'px-3 py-3 first:pl-4 last:pr-4',
+  headRow: 'border-b border-slate-200 text-[13px] font-semibold tracking-[-0.016em] text-slate-500',
+  headCell: 'px-3.5 py-3 first:pl-5 last:pr-5',
+  row: 'cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50',
+  cell: 'px-3.5 py-3.5 first:pl-5 last:pr-5',
 } as const;

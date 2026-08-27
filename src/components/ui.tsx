@@ -10,30 +10,44 @@ import { twMerge } from 'tailwind-merge';
 // nên module mới không tái sử dụng được và buộc phải tự dựng bản sao —
 // dẫn tới hai bộ nút, hai bộ badge, lệch nhau dần theo thời gian.
 //
-// Class của Card/Button/Badge giữ NGUYÊN VĂN như bản cũ trong App.tsx để giao
-// diện đang chạy không đổi một pixel nào.
+// NGÔN NGỮ HÌNH THỨC: Apple, theo DESIGN.md ở gốc repo.
+//
+// Ba luật của DESIGN.md quyết định gần như toàn bộ file này:
+//
+//   1. Bo góc pill (9999px) LÀ tín hiệu "bấm được". Nút chính là viên nang xanh
+//      Action Blue; không có nút nào vuông góc mà lại là hành động chính.
+//   2. Không đổ bóng lên thẻ, nút, hay chữ. Phân tầng đến từ ĐỔI MÀU NỀN và
+//      đường hairline 1px, không phải từ shadow. Card vì thế bỏ `shadow-sm`.
+//   3. `transform: scale(0.95)` khi nhấn — vi tương tác dùng chung toàn hệ.
+//
+// Thang cân chữ là 300/400/600/700, KHÔNG có 500. Chỗ nào cần "đậm vừa" thì
+// dùng 600 (`font-semibold`), không phải `font-medium`.
 // ===========================================================================
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Store utility card của DESIGN.md: nền trắng, hairline 1px, bo 18px
+// (`rounded-xl` đã được ánh xạ về 18px trong index.css), KHÔNG bóng.
 export const Card: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ children, className, ...props }) => (
-  <div className={cn("bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden", className)} {...props}>
+  <div className={cn("bg-white rounded-xl border border-slate-200 overflow-hidden", className)} {...props}>
     {children}
   </div>
 );
 
-// Button — có sửa 2 lỗi thật đang tồn tại trong codebase:
+// Button — 5 variant hiện có, ánh xạ sang 5 "ngữ pháp nút" của DESIGN.md:
 //
-//   1. 4 chỗ gọi variant="outline" nhưng bản cũ chỉ định nghĩa 4 variant
-//      primary|secondary|ghost|danger → variants["outline"] là undefined →
-//      những nút đó render KHÔNG CÓ STYLE.
-//   2. 8 chỗ truyền size="sm" nhưng bản cũ không khai prop `size` → React
-//      forward xuống thẻ <button> thành attribute HTML không hợp lệ.
+//   primary   → button-primary        viên nang Action Blue, chữ trắng
+//   outline   → button-secondary-pill viên nang rỗng, viền + chữ Action Blue
+//   secondary → button-pearl-capsule  nền pearl #fafafc, bo 11px, ring mềm
+//   ghost     → text-link             không nền, chỉ chữ
+//   danger    → (lệch có chủ đích)    viên nang đỏ hệ thống Apple
 //
-// Thêm 'outline' và `size` vào đây là 12 chỗ đó hiện đúng như tác giả định làm.
-// Mặc định size='md' giữ nguyên "px-4 py-2" nên mọi chỗ gọi cũ không đổi.
+// Vì sao `danger` vẫn còn dù DESIGN.md cấm màu nhấn thứ hai: apple.com không có
+// nút xoá và không có nút từ chối. App này có, và một hành động một chiều mà
+// trông y hệt hành động thường là cách nhanh nhất để mất dữ liệu. Lý do đầy đủ
+// nằm ở đầu src/index.css.
 export const Button = ({
   children,
   variant = 'primary',
@@ -45,20 +59,26 @@ export const Button = ({
   size?: 'sm' | 'md';
 }) => {
   const variants = {
-    primary: "bg-indigo-600 text-white hover:bg-indigo-700",
-    secondary: "bg-slate-100 text-slate-900 hover:bg-slate-200",
-    ghost: "bg-transparent text-slate-600 hover:bg-slate-50",
-    danger: "bg-red-50 text-red-600 hover:bg-red-100",
-    outline: "bg-white text-slate-700 border border-slate-300 hover:bg-slate-50",
+    primary: "bg-indigo-600 text-white hover:bg-indigo-700 rounded-full",
+    secondary: "bg-[#fafafc] text-slate-700 border border-slate-200 hover:bg-slate-50 rounded-md",
+    ghost: "bg-transparent text-slate-600 hover:text-slate-900 rounded-full",
+    danger: "bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 rounded-full",
+    outline: "bg-transparent text-indigo-600 border border-indigo-600/40 hover:border-indigo-600 hover:bg-indigo-50 rounded-full",
   };
+  // Padding ngang rộng hơn dọc — hình viên nang chỉ đọc ra "nút" khi nó dài.
+  // DESIGN.md: 11px × 22px cho nút chính, 8px × 15px cho nút tiện ích.
   const sizes = {
-    sm: "px-3 py-1.5 text-sm",
-    md: "px-4 py-2",
+    sm: "px-4 py-1.5 text-[14px]",
+    md: "px-5 py-2.5 text-[15px]",
   };
   return (
     <button
       className={cn(
-        "rounded-lg font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50",
+        "font-normal transition-all duration-150 flex items-center justify-center gap-2",
+        // Vi tương tác dùng chung toàn hệ Apple. `active:` chứ không `hover:`
+        // — DESIGN.md §Iteration Guide: "Never document hover."
+        "active:scale-95",
+        "disabled:opacity-40 disabled:active:scale-100 disabled:cursor-not-allowed",
         sizes[size],
         variants[variant],
         className
@@ -70,6 +90,10 @@ export const Button = ({
   );
 };
 
+// Badge — viên nang nhỏ. Bỏ `uppercase` + `tracking-wider` của bản cũ: chữ hoa
+// giãn ly là ngữ pháp của Material/Bootstrap, không phải Apple. Apple viết nhãn
+// ở dạng câu thường, cân 600, tracking ÂM. Nhãn tiếng Việt có dấu ("Chờ tiếp
+// nhận") đọc dễ hơn hẳn khi không bị ép hoa.
 export const Badge = ({
   children,
   variant = 'neutral',
@@ -80,16 +104,16 @@ export const Badge = ({
   className?: string;
 }) => {
   const variants = {
-    neutral: "bg-slate-100 text-slate-600",
-    success: "bg-emerald-100 text-emerald-700",
-    warning: "bg-amber-100 text-amber-700",
-    info: "bg-blue-100 text-blue-700",
-    danger: "bg-red-100 text-red-700",
-    primary: "bg-indigo-100 text-indigo-700",
-    sky: "bg-sky-100 text-sky-700"
+    neutral: "bg-slate-100 text-slate-700",
+    success: "bg-emerald-50 text-emerald-700",
+    warning: "bg-amber-50 text-amber-800",
+    info: "bg-indigo-50 text-indigo-700",
+    danger: "bg-red-50 text-red-600",
+    primary: "bg-indigo-50 text-indigo-700",
+    sky: "bg-sky-50 text-sky-700"
   };
   return (
-    <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider", variants[variant], className)}>
+    <span className={cn("px-2.5 py-0.5 rounded-full text-[12px] font-semibold tracking-[-0.01em] whitespace-nowrap", variants[variant], className)}>
       {children}
     </span>
   );
@@ -109,7 +133,7 @@ export const Badge = ({
 // ---------------------------------------------------------------------------
 
 export const Skeleton = ({ className }: { className?: string }) => (
-  <div className={cn("animate-pulse rounded-lg bg-slate-100", className)} />
+  <div className={cn("animate-pulse rounded-md bg-slate-100", className)} />
 );
 
 export type StateKind = 'loading' | 'empty' | 'error' | 'denied' | 'offline';
@@ -168,13 +192,16 @@ export const StateBlock = ({
   };
   const p = preset[kind];
   return (
-    <div className={cn("flex flex-col items-center justify-center gap-2 px-6 py-12 text-center", className)}>
+    <div className={cn("flex flex-col items-center justify-center gap-2 px-6 py-14 text-center", className)}>
       <div className={p.tone}>{p.icon}</div>
-      <p className="text-sm font-semibold text-slate-700">{title ?? p.title}</p>
+      {/* 17px/600 — cỡ thân bài của Apple, không phải 14px. DESIGN.md §Do's:
+          "Run body copy at 17px — not 16px. The extra pixel defines the brand's
+          reading pace." Màn trống là chỗ người ta ĐỌC, không phải chỗ quét. */}
+      <p className="text-[17px] font-semibold tracking-[-0.022em] text-slate-900">{title ?? p.title}</p>
       {(description ?? p.description) && (
-        <p className="max-w-sm text-xs leading-relaxed text-slate-500">{description ?? p.description}</p>
+        <p className="max-w-md text-[14px] leading-[1.43] tracking-[-0.016em] text-slate-500">{description ?? p.description}</p>
       )}
-      {action && <div className="mt-2">{action}</div>}
+      {action && <div className="mt-3">{action}</div>}
     </div>
   );
 };
