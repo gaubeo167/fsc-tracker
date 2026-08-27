@@ -13,6 +13,7 @@ import { TicketDetail } from '../TicketDetail';
 import type { Ticket } from '../../types';
 import { useSupportModules } from '../../hooks/useSupportModules';
 import { useOpenTicketEvent } from '../../hooks/useOpenTicketEvent';
+import { useCampuses } from '../../hooks/useCampuses';
 
 // ===========================================================================
 // Đơn yêu cầu thuộc các phân hệ TÔI phụ trách.
@@ -60,6 +61,7 @@ export function MyModuleTickets({
   // đổ vào dự án mình phụ trách.
   const myModuleCodes = scope.moduleCodes;
   const { nameOf: tenPhanHe } = useSupportModules();
+  const { nameOf: tenDonVi } = useCampuses();
   useOpenTicketEvent(setOpen);
 
   const mine = useMemo(
@@ -76,7 +78,7 @@ export function MyModuleTickets({
     return (
       <TicketDetail
         ticket={open}
-        campusName={open.campusId}
+        campusName={tenDonVi(open.campusId)}
         actorUid={actorUid}
         canResolve
         onChanged={() => { setOpen(null); void load(); }}

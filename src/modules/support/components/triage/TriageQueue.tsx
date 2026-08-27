@@ -1,9 +1,9 @@
 import {
-  AlertTriangle, CalendarClock, Check, ChevronDown, ChevronUp, Flag, HelpCircle,
-  Inbox, Mail, MessageSquare, UserRound, Users, X,
+  AlertTriangle, Building2, CalendarClock, Check, ChevronDown, ChevronRight, ChevronUp,
+  Flag, HelpCircle, Inbox, Mail, MessageSquare, UserRound, Users, X,
 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, StateBlock, cn } from '../../../../components/ui';
+import { Button, Card, StateBlock, cn } from '../../../../components/ui';
 import { ICON } from '../../ui/tokens';
 import { vi } from '../../i18n/vi';
 import type { RepoError } from '../../repository/campusRepository';
@@ -16,6 +16,8 @@ import { useWorkingCalendar } from '../../hooks/useWorkingCalendar';
 import { StatusBadge, TypeIcon } from '../../ui/tokens';
 import { findPolicy } from '../../services/slaCalculator';
 import { useSupportModules } from '../../hooks/useSupportModules';
+import { useCampuses } from '../../hooks/useCampuses';
+import { TicketDetail } from '../TicketDetail';
 import {
   DomainError,
   type SupportModuleCode, type SupportModuleConfig, type Ticket, type TicketPriority,
@@ -36,8 +38,15 @@ import {
 type Toast = (m: string, t?: 'success' | 'error' | 'info') => void;
 
 /** Một lớp ô nhập cho MỌI ô trong khung tiếp nhận — cao bằng nhau, viền như nhau. */
+// Bo 11px = `button-pearl-capsule` của DESIGN.md — bán kính Apple dành cho ô
+// nhỏ. KHÔNG dùng 18px (`rounded-lg`): đó là bán kính của thẻ, đặt lên ô nhập
+// cao 42px thì nó tròn gần thành viên nang và đọc nhầm ra nút bấm.
+//
+// Cố ý BỎ `focus:outline-none` của bản cũ: index.css khai một vòng focus 2px
+// Focus Blue dùng chung cho mọi điều khiển, tắt outline ở đây là tự đục một lỗ
+// trợ năng ngay giữa form bắt buộc.
 const O_NHAP =
-  'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 focus:border-indigo-500 focus:outline-none';
+  'mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3.5 py-2.5 text-[15px] tracking-[-0.016em] text-slate-900 focus:border-indigo-500';
 
 const GHI_CHU_TOI_DA = 500;
 
@@ -50,7 +59,7 @@ const GHI_CHU_TOI_DA = 500;
  */
 function Nhan({ icon, children, bat }: { icon: React.ReactNode; children: React.ReactNode; bat?: boolean }) {
   return (
-    <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+    <span className="flex items-center gap-1.5 text-[13px] font-semibold tracking-[-0.016em] text-slate-700">
       <span className="text-slate-400">{icon}</span>
       {children}
       {bat && <span className="text-red-500" aria-hidden>*</span>}
@@ -146,7 +155,14 @@ export function TriageQueue({
     useState<{ id: string; mode: 'accept' | 'reject' | 'info' } | null>(null);
   const [reason, setReason] = useState('');
   const [collapsed, setCollapsed] = useState(false);
+  // Phiếu đang xem chi tiết. Hàng đợi chỉ hiện được hai dòng mô tả cắt cụt —
+  // không đủ để quyết định tiếp nhận hay từ chối một yêu cầu, vì các trường
+  // quan trọng nhất (các bước tái hiện, kết quả mong đợi/thực tế, ảnh đính kèm,
+  // lịch sử trao đổi) đều nằm ngoài phần cắt đó.
+  const [openDetail, setOpenDetail] = useState<Ticket | null>(null);
   const { nameOf: tenPhanHe } = useSupportModules();
+  // Danh bạ đơn vị: đổi mã trường ("FCG") thành tên người đọc hiểu được.
+  const { nameOf: tenDonVi, campusOf } = useCampuses();
   const lichLamViec = useWorkingCalendar();
   const [scope, setScope] = useState<{
     moduleCodes: string[]; projectNames: string[]; byModule: Record<string, ModuleScope>;
@@ -311,6 +327,23 @@ export function TriageQueue({
     }
   }
 
+  // Chi tiết chiếm trọn màn, không phải modal: phiếu có ảnh đính kèm và lịch sử
+  // trao đổi dài, nhét vào hộp nổi thì phải cuộn trong cuộn. Quay lại thì nạp
+  // lại hàng đợi — người dùng có thể vừa thao tác gì đó bên trong màn chi tiết.
+  if (openDetail) {
+    return (
+      <TicketDetail
+        ticket={openDetail}
+        campusName={tenDonVi(openDetail.campusId)}
+        actorUid={actorUid}
+        canResolve
+        onChanged={() => { setOpenDetail(null); void reload(); }}
+        onBack={() => { setOpenDetail(null); void reload(); }}
+        onToast={onToast}
+      />
+    );
+  }
+
   if (tickets === null || modules === null) return <StateBlock kind="loading" />;
 
   if (error) {
@@ -341,12 +374,16 @@ export function TriageQueue({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-start gap-2.5">
-        <Inbox size={ICON.xl} className="mt-0.5 shrink-0 text-slate-400" />
+    <div className="space-y-4">
+      <div className="flex items-start gap-3">
+        <Inbox size={ICON.xl} className="mt-1 shrink-0 text-slate-400" />
         <div>
-        <h2 className="text-lg font-bold text-slate-900">Chờ tiếp nhận</h2>
-        <p className="mt-0.5 text-sm text-slate-500">
+        {/* 21px/600 = token `tagline` của DESIGN.md, vai trò "tên chuyên mục".
+            Tracking âm là nhịp tiêu đề đặc trưng — xem @layer base ở index.css. */}
+        <h2 className="text-[21px] font-semibold leading-[1.19] tracking-[-0.022em] text-slate-900">
+          Chờ tiếp nhận
+        </h2>
+        <p className="mt-1 text-[14px] leading-[1.43] tracking-[-0.016em] text-slate-500">
           Phụ trách: {myModules.map(tenPhanHe).join(' · ')}
           {scope.projectNames.length > 0 && !isAdmin && (
             <span className="text-slate-400"> · qua dự án {scope.projectNames.join(', ')}</span>
@@ -364,8 +401,10 @@ export function TriageQueue({
           />
         ) : (
           <>
-            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
-              <span className="flex items-center gap-2 text-sm font-medium text-slate-600">
+            {/* Nền parchment thay cho đường viền dày: DESIGN.md §Do's — "alternate
+                surface before adding chrome". Đổi màu nền LÀ đường phân cách. */}
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-5 py-3">
+              <span className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.016em] text-slate-700">
                 <Inbox size={ICON.lg} className="text-slate-400" />
                 {tickets.length} phiếu chờ tiếp nhận
               </span>
@@ -395,45 +434,111 @@ export function TriageQueue({
                 const projectPeople = basePeople.includes(actorUid)
                   ? basePeople
                   : [actorUid, ...basePeople];
+                const donVi = campusOf(t.campusId);
+                // Tỉnh/thành và cấp học chỉ hiện khi CÓ. Trường nhập trước khi
+                // hai ô này ra đời vẫn phải đọc được, và một dấu chấm giữa
+                // trông như lỗi hiển thị.
+                const phuChuDonVi = [donVi?.province, donVi?.levels].filter(Boolean).join(' · ');
                 return (
                   <li key={t.id} className="px-5 py-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <TypeIcon type={t.type} size={ICON.lg} />
-                      <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-bold tabular-nums text-slate-600">
-                        {t.ticketNo}
-                      </span>
-                      <Badge variant="neutral">{t.campusId}</Badge>
-                      <StatusBadge status={t.status} />
-                      {t.attachments?.length > 0 && (
-                        <span className="text-[10px] text-slate-400">{t.attachments.length} đính kèm</span>
-                      )}
-                    </div>
-                    <p className="mt-1.5 text-base font-bold leading-snug text-slate-900">{t.title}</p>
-                    {t.description && (
-                      <p className="mt-0.5 line-clamp-2 text-sm text-slate-500">{t.description}</p>
-                    )}
-                    {t.contactEmail && (
-                      <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
-                        <Mail size={ICON.xs} className="shrink-0" />
-                        Đầu mối: {t.contactName}
-                        <span aria-hidden>·</span>
-                        {/* mailto: kỹ thuật viên liên hệ được ngay từ hàng đợi,
-                            không phải chép tay địa chỉ sang ứng dụng mail. */}
-                        <a
-                          href={`mailto:${t.contactEmail}?subject=${encodeURIComponent(`[${t.ticketNo}] ${t.title}`)}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="font-medium text-indigo-600 underline decoration-indigo-200 underline-offset-2"
-                        >
-                          {t.contactEmail}
-                        </a>
+                    {/* Vùng bấm để mở chi tiết.
+                        Chỉ bọc phần NỘI DUNG (mã, tiêu đề, mô tả, đơn vị) —
+                        không bọc cả dòng. Khung tiếp nhận bung ra ngay bên dưới
+                        và chứa select/input/textarea; để cả dòng bắt click thì
+                        mỗi lần bấm vào ô ghi chú lại nhảy sang màn chi tiết,
+                        mất sạch thứ đang gõ dở. */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setOpenDetail(t)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenDetail(t); }
+                      }}
+                      aria-label={`Xem chi tiết phiếu ${t.ticketNo}: ${t.title}`}
+                      className="group -mx-2 cursor-pointer rounded-md px-2 py-1 transition-colors hover:bg-slate-50"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <TypeIcon type={t.type} size={ICON.lg} />
+                        <span className="rounded-xs bg-slate-100 px-2 py-0.5 font-mono text-[12px] font-semibold tabular-nums text-slate-600">
+                          {t.ticketNo}
+                        </span>
+                        <StatusBadge status={t.status} />
+                        {t.attachments?.length > 0 && (
+                          <span className="text-[12px] text-slate-400">{t.attachments.length} đính kèm</span>
+                        )}
+                      </div>
+
+                      {/* 17px/600 = token `body-strong`. DESIGN.md §Do's: thân
+                          bài chạy 17px chứ không 16px — "the extra pixel defines
+                          the brand's reading pace". */}
+                      <p className="mt-2 text-[17px] font-semibold leading-[1.24] tracking-[-0.022em] text-slate-900 group-hover:text-indigo-600">
+                        {t.title}
                       </p>
-                    )}
+                      {t.description && (
+                        <p className="mt-1 line-clamp-2 text-[17px] leading-[1.47] tracking-[-0.022em] text-slate-500">
+                          {t.description}
+                        </p>
+                      )}
+
+                      {/* ĐƠN VỊ GỬI — khối riêng, không phải một badge mã ba chữ.
+                          Bản cũ chỉ hiện một Badge chứa t.campusId, tức "FCG".
+                          Người trực hàng đợi nhìn ba chữ đó không biết là cơ sở
+                          nào, ở đâu, cấp học gì — mà đó chính là thứ quyết định
+                          phiếu này khẩn tới đâu và gọi cho ai.
+                          Nền parchment thay cho viền, đúng luật "đổi mặt phẳng
+                          trước khi thêm khung" của DESIGN.md. */}
+                      <div className="mt-2.5 rounded-md bg-slate-50 px-3 py-2.5">
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                          <Building2 size={ICON.sm} className="shrink-0 translate-y-0.5 text-slate-400" aria-hidden />
+                          <span className="text-[14px] font-semibold leading-[1.29] tracking-[-0.016em] text-slate-900">
+                            {tenDonVi(t.campusId)}
+                          </span>
+                          {/* Mã vẫn giữ: đó là thứ người ta gõ khi tra cứu và
+                              là thứ in trên mọi báo cáo. Nhưng nó đứng SAU tên,
+                              ở vai trò phụ chú. */}
+                          {donVi && donVi.code !== donVi.name && (
+                            <span className="rounded-xs bg-white px-1.5 py-0.5 font-mono text-[12px] font-semibold tabular-nums text-slate-500">
+                              {donVi.code}
+                            </span>
+                          )}
+                          {phuChuDonVi && (
+                            <span className="text-[14px] leading-[1.43] tracking-[-0.016em] text-slate-500">
+                              {phuChuDonVi}
+                            </span>
+                          )}
+                        </div>
+                        {t.contactEmail && (
+                          <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[14px] leading-[1.43] tracking-[-0.016em] text-slate-500">
+                            <Mail size={ICON.sm} className="shrink-0 text-slate-400" />
+                            Người gửi: <span className="text-slate-700">{t.contactName}</span>
+                            <span aria-hidden>·</span>
+                            {/* mailto: kỹ thuật viên liên hệ được ngay từ hàng đợi,
+                                không phải chép tay địa chỉ sang ứng dụng mail.
+                                stopPropagation để bấm vào email không mở màn chi tiết. */}
+                            <a
+                              href={`mailto:${t.contactEmail}?subject=${encodeURIComponent(`[${t.ticketNo}] ${t.title}`)}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-indigo-600 underline decoration-indigo-200 underline-offset-2"
+                            >
+                              {t.contactEmail}
+                            </a>
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Lời mời bấm. Không có nó thì "bấm vào đâu để xem chi
+                          tiết" là thứ người dùng phải đoán — và họ đoán sai. */}
+                      <span className="mt-2 inline-flex items-center gap-0.5 text-[14px] tracking-[-0.016em] text-indigo-600">
+                        Xem chi tiết yêu cầu
+                        <ChevronRight size={ICON.sm} className="transition-transform group-hover:translate-x-0.5" />
+                      </span>
+                    </div>
 
                     {/* Phiếu đang chờ trường trả lời: hiện đúng câu đã hỏi, để
                         người tiếp nhận biết đang chờ cái gì mà không phải mở
                         phiếu ra đọc lại. */}
                     {t.status === 'NEEDS_INFO' && (
-                      <p className="mt-2 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">
+                      <p className="mt-2.5 flex items-start gap-2 rounded-md bg-red-50 px-3.5 py-2.5 text-[14px] leading-[1.43] tracking-[-0.016em] text-red-700">
                         <HelpCircle size={ICON.md} className="mt-0.5 shrink-0" />
                         <span>
                           Đang chờ trường bổ sung:{' '}
@@ -447,14 +552,14 @@ export function TriageQueue({
                     {/* Phân hệ chưa gán dự án thì không sinh task được — nói ngay
                         thay vì để họ bấm rồi mới báo lỗi. */}
                     {noProject && (
-                      <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      <p className="mt-2.5 flex items-center gap-2 rounded-md bg-amber-50 px-3.5 py-2.5 text-[14px] leading-[1.43] tracking-[-0.016em] text-amber-800">
                         <AlertTriangle size={ICON.sm} className="shrink-0" />
                         Phân hệ này chưa được gán dự án. Vào tab Phân hệ để gán trước khi tiếp nhận.
                       </p>
                     )}
 
                     {rowError[t.id] && (
-                      <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+                      <p className="mt-2.5 rounded-md bg-red-50 px-3.5 py-2.5 text-[15px] leading-[1.4] tracking-[-0.016em] text-red-600">
                         {rowError[t.id]}
                       </p>
                     )}
@@ -462,7 +567,7 @@ export function TriageQueue({
                     {/* Ba lựa chọn. Không mở modal: hàng đợi nhiều dòng, mở/đóng
                         modal từng cái phá mục tiêu dưới 30 giây mỗi phiếu. */}
                     {openFor?.id !== t.id && (
-                      <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="mt-3.5 flex flex-wrap gap-2">
                         <Button
                           size="sm"
                           disabled={busy === t.id || noProject}
@@ -488,13 +593,16 @@ export function TriageQueue({
                     {/* Chọn "Tiếp nhận" rồi mới phải điền: ưu tiên, người xử lý,
                         hạn hoàn thành, CC. */}
                     {openFor?.id === t.id && openFor.mode === 'accept' && (
-                      <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
-                        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+                      <div className="mt-3.5 rounded-xl border border-indigo-200 bg-indigo-50/40 p-5">
+                        {/* Chữ thường, cân 600 — bỏ `uppercase tracking-wider`
+                            của bản cũ. Chữ hoa giãn ly không nằm trong hệ Apple,
+                            và nhãn tiếng Việt có dấu bị ép hoa thì khó đọc. */}
+                        <div className="flex items-center gap-1.5 text-[14px] font-semibold tracking-[-0.016em] text-indigo-700">
                           <ChevronDown size={ICON.md} />
                           Thông tin tiếp nhận
                         </div>
 
-                        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                        <div className="mt-4 grid gap-4 lg:grid-cols-3">
                           <label className="block">
                             <Nhan icon={<Flag size={ICON.sm} />} bat>Độ ưu tiên</Nhan>
                             <select
@@ -534,7 +642,7 @@ export function TriageQueue({
                                 <div className={cn(O_NHAP, 'bg-slate-50 text-slate-700')}>
                                   {nameOf(actorUid)} (tôi)
                                 </div>
-                                <span className="mt-1 block text-[11px] text-slate-400">
+                                <span className="mt-1.5 block text-[12px] leading-[1.3] tracking-[-0.01em] text-slate-400">
                                   Bạn là thành viên dự án nên chỉ tự nhận việc. Quản lý dự án mới giao được cho người khác.
                                 </span>
                               </>
@@ -570,7 +678,7 @@ export function TriageQueue({
                                   className={cn(O_NHAP, 'mt-2')}
                                   aria-label="Ngày hết hạn"
                                 />
-                                <span className="mt-1 block text-[11px] text-slate-400">
+                                <span className="mt-1.5 block text-[12px] tracking-[-0.01em] text-slate-400">
                                   Điền sẵn theo SLA của {d.priority}
                                 </span>
                               </>
@@ -584,12 +692,12 @@ export function TriageQueue({
                                     step={1}
                                     value={Number.isFinite(d.soNgayDuKien) ? d.soNgayDuKien : ''}
                                     onChange={(e) => patch(t, { soNgayDuKien: Number(e.target.value) })}
-                                    className="w-full border-none bg-transparent py-2.5 text-sm text-slate-800 focus:outline-none"
+                                    className="w-full border-none bg-transparent py-2.5 text-[15px] tracking-[-0.016em] text-slate-900 focus:outline-none"
                                     aria-label="Số ngày dự kiến hoàn thành"
                                   />
-                                  <span className="shrink-0 pr-3 text-xs text-slate-500">ngày làm việc</span>
+                                  <span className="shrink-0 pr-3.5 text-[14px] tracking-[-0.016em] text-slate-500">ngày làm việc</span>
                                 </div>
-                                <span className="mt-1 block text-[11px] text-slate-400">
+                                <span className="mt-1.5 block text-[12px] tracking-[-0.01em] text-slate-400">
                                   Hạn sẽ tự chốt khi người xử lý chọn ngày bắt đầu bên Công việc.
                                 </span>
                               </>
@@ -611,7 +719,7 @@ export function TriageQueue({
                           />
                           {/* Đếm ký tự để người viết biết còn bao nhiêu chỗ, thay
                               vì gõ tới giới hạn rồi bàn phím im lặng không nhận. */}
-                          <span className="mt-1 block text-right text-[11px] tabular-nums text-slate-400">
+                          <span className="mt-1.5 block text-right text-[12px] tabular-nums tracking-[-0.01em] text-slate-400">
                             {d.note.length}/{GHI_CHU_TOI_DA}
                           </span>
                         </label>
@@ -623,20 +731,20 @@ export function TriageQueue({
                           <Nhan icon={<Users size={ICON.sm} />}>
                             CC — người cần nắm thông tin (không bắt buộc)
                           </Nhan>
-                          <div className="mt-1 rounded-lg border border-slate-300 bg-white px-2 py-2">
+                          <div className="mt-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-2">
                             {d.cc.length > 0 && (
                               <div className="mb-1.5 flex flex-wrap gap-1.5">
                                 {d.cc.map((uid) => (
                                   <span
                                     key={uid}
-                                    className="inline-flex items-center gap-1 rounded-md bg-indigo-50 py-1 pl-2 pr-1 text-xs font-medium text-indigo-700"
+                                    className="inline-flex items-center gap-1 rounded-full bg-indigo-50 py-1 pl-2.5 pr-1 text-[13px] font-semibold tracking-[-0.01em] text-indigo-700"
                                   >
                                     {nameOf(uid)}
                                     <button
                                       type="button"
                                       aria-label={`Bỏ ${nameOf(uid)} khỏi CC`}
                                       onClick={() => patch(t, { cc: d.cc.filter((x) => x !== uid) })}
-                                      className="rounded p-0.5 text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700"
+                                      className="rounded-full p-0.5 text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700"
                                     >
                                       <X size={ICON.xs} />
                                     </button>
@@ -652,7 +760,7 @@ export function TriageQueue({
                               onChange={(e) => {
                                 if (e.target.value) patch(t, { cc: [...d.cc, e.target.value] });
                               }}
-                              className="w-full border-none bg-transparent px-1 text-sm text-slate-500 focus:outline-none"
+                              className="w-full border-none bg-transparent px-1 text-[15px] tracking-[-0.016em] text-slate-500 focus:outline-none"
                             >
                               <option value="">Chọn thêm người (nếu có)…</option>
                               {projectPeople
@@ -664,7 +772,7 @@ export function TriageQueue({
                           </div>
                         </div>
 
-                        <div className="mt-4 flex items-center gap-3">
+                        <div className="mt-5 flex items-center gap-3">
                           <Button size="sm" disabled={busy === t.id || noProject} onClick={() => accept(t)}>
                             <Check size={ICON.md} />
                             {busy === t.id ? 'Đang tiếp nhận…' : 'Xác nhận và tạo công việc'}
@@ -679,7 +787,7 @@ export function TriageQueue({
                     {/* Từ chối và hỏi thêm dùng chung một ô lý do. */}
                     {openFor?.id === t.id && openFor.mode !== 'accept' && (
                       <div className={cn(
-                        'mt-3 rounded-lg border p-3',
+                        'mt-3.5 rounded-xl border p-4',
                         openFor.mode === 'reject' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'
                       )}>
                         <label className="block">
@@ -698,7 +806,7 @@ export function TriageQueue({
                               : 'Ví dụ: Gửi giúp ảnh chụp màn hình lúc gặp lỗi và mã lớp bị ảnh hưởng.'}
                             className={cn(O_NHAP, 'resize-y')}
                           />
-                          <span className="mt-1 block text-[11px] text-slate-500">
+                          <span className="mt-1.5 block text-[12px] leading-[1.35] tracking-[-0.01em] text-slate-500">
                             {reason.trim().length < 10
                               ? `Còn thiếu ${10 - reason.trim().length} ký tự`
                               : openFor.mode === 'reject'
@@ -706,7 +814,7 @@ export function TriageQueue({
                                 : 'Phiếu quay về trường để bổ sung. Đồng hồ SLA tạm dừng trong lúc chờ.'}
                           </span>
                         </label>
-                        <div className="mt-2 flex gap-2">
+                        <div className="mt-3 flex gap-2">
                           <Button
                             size="sm"
                             variant={openFor.mode === 'reject' ? 'danger' : 'primary'}
