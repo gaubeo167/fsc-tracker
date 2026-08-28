@@ -983,7 +983,7 @@ const TaskTable: React.FC<{
               <td className="px-4 py-3">
                 <div className="flex -space-x-2 overflow-hidden">
                   {assigneeProfiles.map((u, i) => (
-                    <img key={i} src={u.photoURL} className="w-6 h-6 rounded-full border-2 border-white" title={u.displayName} referrerPolicy="no-referrer" />
+                    <Avatar key={i} name={u.displayName} photoURL={u.photoURL} size={6} title={u.displayName} className="border-2 border-white" />
                   ))}
                   {assigneeProfiles.length === 0 && <span className="text-xs text-slate-400 italic">Chưa giao</span>}
                 </div>
@@ -1868,7 +1868,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                         const u = users.find(user => user.uid === uid);
                         return u ? (
                           <div key={uid} className="flex items-center gap-1.5 bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full text-[11px] font-semibold">
-                            <img src={u.photoURL} alt={u.displayName} className="w-4 h-4 rounded-full" referrerPolicy="no-referrer" />
+                            <Avatar name={u.displayName} photoURL={u.photoURL} size={4} title={u.displayName} />
                             {u.displayName}
                           </div>
                         ) : null;
@@ -1904,7 +1904,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                         const u = users.find(user => user.uid === uid);
                         return u ? (
                           <div key={uid} className="flex items-center gap-1.5 bg-amber-50 text-amber-700 px-2 py-1 rounded-full text-[11px] font-semibold">
-                            <img src={u.photoURL} alt={u.displayName} className="w-4 h-4 rounded-full" referrerPolicy="no-referrer" />
+                            <Avatar name={u.displayName} photoURL={u.photoURL} size={4} title={u.displayName} />
                             {u.displayName}
                           </div>
                         ) : null;
@@ -1940,7 +1940,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                         const u = users.find(user => user.uid === uid);
                         return u ? (
                           <div key={uid} className="flex items-center gap-1.5 bg-slate-100 text-slate-700 px-2 py-1 rounded-full text-[11px] font-semibold">
-                            <img src={u.photoURL} alt={u.displayName} className="w-4 h-4 rounded-full" referrerPolicy="no-referrer" />
+                            <Avatar name={u.displayName} photoURL={u.photoURL} size={4} title={u.displayName} />
                             {u.displayName}
                           </div>
                         ) : null;
@@ -2885,12 +2885,13 @@ const Dashboard = ({
                         <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5">Quản lý</p>
                         <div className="flex -space-x-1.5">
                           {projectManagers.map((m, i) => (
-                            <img 
-                              key={i} 
-                              src={m.photoURL} 
-                              className="w-5 h-5 rounded-full border-2 border-white" 
+                            <Avatar
+                              key={i}
+                              name={m.displayName}
+                              photoURL={m.photoURL}
+                              size={5}
                               title={m.displayName}
-                              referrerPolicy="no-referrer"
+                              className="border-2 border-white"
                             />
                           ))}
                         </div>
@@ -3034,7 +3035,7 @@ const Dashboard = ({
                         <td className="px-4 py-3">
                           <div className="flex -space-x-2 overflow-hidden">
                             {assigneeProfiles.map((u, i) => (
-                              <img key={i} src={u.photoURL} className="w-6 h-6 rounded-full border-2 border-white" title={u.displayName} referrerPolicy="no-referrer" />
+                              <Avatar key={i} name={u.displayName} photoURL={u.photoURL} size={6} title={u.displayName} className="border-2 border-white" />
                             ))}
                             {assigneeProfiles.length === 0 && <span className="text-xs text-slate-400 italic">Chưa giao</span>}
                           </div>
@@ -3554,14 +3555,43 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
 };
 
 /**
+ * Cỡ avatar. Phải là bảng tra CỨNG chứ không nội suy `h-${n}`: Tailwind quét
+ * mã nguồn ở dạng chuỗi tĩnh, class ghép động không bao giờ được sinh ra và
+ * avatar sẽ co về 0px.
+ */
+const CO_AVATAR: Record<number, string> = {
+  4: 'h-4 w-4 text-[7px]',
+  5: 'h-5 w-5 text-[8px]',
+  6: 'h-6 w-6 text-[9px]',
+  8: 'h-8 w-8 text-[11px]',
+  10: 'h-10 w-10 text-xs',
+};
+
+/**
  * Ảnh đại diện: dùng ảnh Google nếu có, không thì hai chữ cái đầu.
  *
  * Bản cũ luôn render <img src={photoURL}> — tài khoản không có ảnh (mọi tài
  * khoản tạo trên emulator, và cả tài khoản thật chưa đặt ảnh) cho ra một ô vỡ
  * hình. Chữ cái thì luôn có, và màu suy từ tên nên cùng một người luôn cùng
  * một màu, mắt nhận ra dòng của họ mà không phải đọc.
+ *
+ * VÌ SAO PHẢI DÙNG Ở MỌI CHỖ: AuthProvider ghi `photoURL: user.photoURL || ''`,
+ * nên tài khoản không có ảnh mang chuỗi RỖNG chứ không phải undefined. Render
+ * thẳng <img src=""> thì trình duyệt coi src rỗng là "chính trang này" và TẢI
+ * LẠI TOÀN BỘ TRANG cho mỗi thẻ ảnh — QA đếm được 13 lỗi console và 5 lượt tải
+ * thừa chỉ riêng màn Tổng quan. Đó là lý do component này nhận `size`: trước
+ * đây nó bị khoá cứng 40px nên 10 chỗ khác không dùng được và phải tự render
+ * <img> trần.
  */
-const Avatar = ({ name, photoURL }: { name?: string; photoURL?: string }) => {
+const Avatar: React.FC<{
+  name?: string;
+  photoURL?: string;
+  /** Cạnh avatar theo thang Tailwind (4/5/6/8/10). */
+  size?: keyof typeof CO_AVATAR | number;
+  className?: string;
+  title?: string;
+}> = ({ name, photoURL, size = 10, className, title }) => {
+  const co = CO_AVATAR[size as number] ?? CO_AVATAR[10];
   const chu = (name ?? '?')
     .trim().split(/\s+/).slice(-2).map((w) => w[0] ?? '').join('').toUpperCase() || '?';
   const mau = ['bg-indigo-100 text-indigo-700', 'bg-sky-100 text-sky-700',
@@ -3569,11 +3599,24 @@ const Avatar = ({ name, photoURL }: { name?: string; photoURL?: string }) => {
                'bg-rose-100 text-rose-700', 'bg-violet-100 text-violet-700'];
   let h = 0;
   for (const c of name ?? '') h = (h * 31 + c.charCodeAt(0)) % 997;
-  if (photoURL) {
-    return <img src={photoURL} alt="" className="h-10 w-10 shrink-0 rounded-full border border-slate-200 object-cover" />;
+  // Chuỗi rỗng phải rơi về chữ cái, nên kiểm tra độ dài chứ không chỉ truthy
+  // trên biến có thể là ''. `.trim()` chặn cả trường hợp chuỗi toàn khoảng trắng.
+  if (photoURL && photoURL.trim().length > 0) {
+    return (
+      <img
+        src={photoURL}
+        alt=""
+        title={title}
+        referrerPolicy="no-referrer"
+        className={cn(co, 'shrink-0 rounded-full border border-slate-200 object-cover', className)}
+      />
+    );
   }
   return (
-    <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold", mau[h % mau.length])}>
+    <span
+      title={title}
+      className={cn('flex shrink-0 items-center justify-center rounded-full font-bold', co, mau[h % mau.length], className)}
+    >
       {chu}
     </span>
   );
@@ -4592,7 +4635,7 @@ const TaskCreateModal = ({
               <label className="block text-sm font-medium text-slate-700 mb-1">Người thực hiện (Assignees)</label>
               {profile?.role !== 'admin' && profile?.role !== 'manager' && profile?.role !== 'director' ? (
                 <div className="flex items-center gap-2 p-2 bg-slate-50 border rounded-lg text-xs">
-                  <img src={profile?.photoURL} className="w-5 h-5 rounded-full" referrerPolicy="no-referrer" />
+                  <Avatar name={profile?.displayName} photoURL={profile?.photoURL} size={5} />
                   <span className="font-medium">{profile?.displayName} (Tự gán)</span>
                 </div>
               ) : (
@@ -5576,7 +5619,7 @@ function AuthConsumer({
               </div>
               <div className="p-6 border-t border-slate-100">
                 <div className="flex items-center gap-3 mb-6">
-                  <img src={profile?.photoURL} className="w-10 h-10 rounded-full border-2 border-indigo-50" alt="Avatar" />
+                  <Avatar name={profile?.displayName} photoURL={profile?.photoURL} size={10} className="border-2 border-indigo-50" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-slate-900 truncate">{profile?.displayName}</p>
                     <p className="text-xs text-slate-500 truncate capitalize">{profile?.role}</p>
@@ -5624,7 +5667,7 @@ function AuthConsumer({
 
         <div className="mt-auto p-8 border-t border-slate-100">
           <div className="flex items-center gap-3 mb-6">
-            <img src={profile?.photoURL} className="w-10 h-10 rounded-full border-2 border-indigo-50" alt="Avatar" />
+            <Avatar name={profile?.displayName} photoURL={profile?.photoURL} size={10} className="border-2 border-indigo-50" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-slate-900 truncate">{profile?.displayName}</p>
               <p className="text-xs text-slate-500 truncate capitalize">{profile?.role}</p>
@@ -5668,7 +5711,7 @@ function AuthConsumer({
               <Settings size={20} />
             </button>
             <div className="lg:hidden">
-              <img src={profile?.photoURL} className="w-8 h-8 rounded-full border border-slate-200" alt="Avatar" />
+              <Avatar name={profile?.displayName} photoURL={profile?.photoURL} size={8} />
             </div>
           </div>
         </header>
