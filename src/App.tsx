@@ -141,6 +141,45 @@ import {
   createInvitation, deleteInvitation, watchInvitations, type Invitation as PreAuth,
 } from './modules/support/repository/invitationRepository';
 
+/**
+ * Màu biểu đồ theo trạng thái công việc.
+ *
+ * Vì sao phải khai một chỗ bằng hex thay vì dùng class Tailwind: Recharts nhận
+ * màu qua thuộc tính `fill`/`color` dạng chuỗi, không qua className. Nên tầng
+ * token Apple ở index.css — thứ đã đổi màu cho toàn bộ phần còn lại của app —
+ * KHÔNG với tới được biểu đồ. Trước khi có hằng số này, hai mảng màu chép tay
+ * nằm ở ReportsView và ProjectDetail vẫn giữ nguyên thang Tailwind cũ, nên màn
+ * Báo cáo là màn duy nhất trong app còn dùng bảng màu khác.
+ *
+ * Giá trị lấy từ hệ màu hệ thống của Apple (HIG) và ánh xạ ĐÚNG với variant của
+ * Badge, để một trạng thái luôn mang một màu dù nó xuất hiện ở biểu đồ hay ở
+ * nhãn trong bảng.
+ *
+ * NGOẠI LỆ CÓ CHỦ ĐÍCH — `rejected` là NÂU, không phải đỏ như Badge của nó.
+ *
+ * Badge ánh xạ CẢ `overdue` LẪN `rejected` vào variant "danger" (đỏ). Trong
+ * bảng thì không sao: hai thứ đó là hai nhãn riêng đứng cạnh nhau, đọc chữ là
+ * biết. Trong biểu đồ tròn thì chúng là hai LÁT phải phân biệt bằng màu, mà
+ * bản cũ cho cả hai đúng một mã #ef4444 nên chú giải trở thành vô dụng.
+ *
+ * Thử hồng hệ thống #ff2d55 trước — vẫn hỏng: cạnh #ff3b30 trong ô chú giải
+ * 10px, mắt không tách được hai sắc đỏ ấm đó. Nâu #a2845e (cũng thuộc HIG)
+ * khác hẳn ở mọi kích thước, và sắc trầm đọc đúng nghĩa "đã đóng, không làm
+ * nữa" — trong khi đỏ để dành cho thứ đang cháy là `overdue`.
+ *
+ * Trong biểu đồ, đọc được lát nào là lát nào quan trọng hơn việc trung thành
+ * với màu badge.
+ */
+const MAU_TRANG_THAI = {
+  pending:       '#ff9500', // cam  — khớp Badge "warning"
+  todo:          '#86868b', // xám  — khớp Badge "neutral"
+  'in-progress': '#0066cc', // lam  — khớp Badge "info"
+  overdue:       '#ff3b30', // đỏ   — thứ đang cháy
+  review:        '#32ade6', // xanh biển — khớp Badge "sky"
+  done:          '#34c759', // lục  — khớp Badge "success"
+  rejected:      '#a2845e', // nâu  — xem ghi chú ngoại lệ ở trên
+} as const;
+
 const getProgressColor = (progress: number) => {
   if (progress <= 30) return 'bg-red-500';
   if (progress <= 70) return 'bg-blue-500';
@@ -4260,13 +4299,13 @@ const ReportsView = () => {
       const overdueCount = allTasks.filter(t => isTaskOverdue(t)).length;
       
       const data = [
-        { name: 'Chờ duyệt', value: statusCounts.pending || 0, color: '#94a3b8' },
-        { name: 'Sẵn sàng', value: statusCounts.todo || 0, color: '#3b82f6' },
-        { name: 'Đang làm', value: statusCounts['in-progress'] || 0, color: '#f59e0b' },
-        { name: 'Quá hạn', value: overdueCount, color: '#ef4444' },
-        { name: 'Chờ nghiệm thu', value: statusCounts.review || 0, color: '#0ea5e9' },
-        { name: 'Hoàn thành', value: statusCounts.done || 0, color: '#10b981' },
-        { name: 'Bị từ chối', value: statusCounts.rejected || 0, color: '#ef4444' },
+        { name: 'Chờ duyệt', value: statusCounts.pending || 0, color: MAU_TRANG_THAI.pending },
+        { name: 'Sẵn sàng', value: statusCounts.todo || 0, color: MAU_TRANG_THAI.todo },
+        { name: 'Đang làm', value: statusCounts['in-progress'] || 0, color: MAU_TRANG_THAI['in-progress'] },
+        { name: 'Quá hạn', value: overdueCount, color: MAU_TRANG_THAI.overdue },
+        { name: 'Chờ nghiệm thu', value: statusCounts.review || 0, color: MAU_TRANG_THAI.review },
+        { name: 'Hoàn thành', value: statusCounts.done || 0, color: MAU_TRANG_THAI.done },
+        { name: 'Bị từ chối', value: statusCounts.rejected || 0, color: MAU_TRANG_THAI.rejected },
       ];
       setStats(data);
       setLoading(false);
@@ -4731,13 +4770,13 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
 
   const stats = [
-    { name: 'Pending', value: tasks.filter(t => t.status === 'pending').length, color: '#94a3b8' },
-    { name: 'Todo', value: tasks.filter(t => t.status === 'todo').length, color: '#3b82f6' },
-    { name: 'In Progress', value: tasks.filter(t => t.status === 'in-progress').length, color: '#f59e0b' },
-    { name: 'Overdue', value: tasks.filter(t => isTaskOverdue(t)).length, color: '#ef4444' },
-    { name: 'Review', value: tasks.filter(t => t.status === 'review').length, color: '#0ea5e9' },
-    { name: 'Done', value: tasks.filter(t => t.status === 'done').length, color: '#10b981' },
-    { name: 'Rejected', value: tasks.filter(t => t.status === 'rejected').length, color: '#ef4444' },
+    { name: 'Pending', value: tasks.filter(t => t.status === 'pending').length, color: MAU_TRANG_THAI.pending },
+    { name: 'Todo', value: tasks.filter(t => t.status === 'todo').length, color: MAU_TRANG_THAI.todo },
+    { name: 'In Progress', value: tasks.filter(t => t.status === 'in-progress').length, color: MAU_TRANG_THAI['in-progress'] },
+    { name: 'Overdue', value: tasks.filter(t => isTaskOverdue(t)).length, color: MAU_TRANG_THAI.overdue },
+    { name: 'Review', value: tasks.filter(t => t.status === 'review').length, color: MAU_TRANG_THAI.review },
+    { name: 'Done', value: tasks.filter(t => t.status === 'done').length, color: MAU_TRANG_THAI.done },
+    { name: 'Rejected', value: tasks.filter(t => t.status === 'rejected').length, color: MAU_TRANG_THAI.rejected },
   ];
 
   useEffect(() => {
