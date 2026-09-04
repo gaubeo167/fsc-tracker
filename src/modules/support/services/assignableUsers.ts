@@ -12,8 +12,22 @@ import type { UserProfile, UserRole } from '../../../types';
  */
 const CAN_READ_ASSIGNMENTS: UserRole[] = ['admin', 'manager', 'director'];
 
-/** true khi tài khoản này đọc được support_role_assignments. */
-export function canReadRoleAssignments(role?: UserRole | null): boolean {
+/**
+ * true khi tài khoản này đọc được support_role_assignments.
+ *
+ * Hai vế, đúng bằng hai nhánh của rules:
+ *   - vai trò module Công việc là quản lý/giám đốc/admin  -> isTaskLeader/isAdmin
+ *   - hoặc là nhân sự PTUD (lập trình viên, đầu mối phân hệ…) -> isPtudStaff
+ *
+ * Vế thứ hai KHÔNG thừa: nhân viên dự án có `users.role` là 'user' y hệt cán bộ
+ * trường, nhưng họ vẫn có ô CC khi tạo công việc. Bỏ vế này thì ô đó lại liệt kê
+ * cán bộ trường — đúng thứ tính năng này sinh ra để bỏ đi.
+ */
+export function canReadRoleAssignments(
+  role?: UserRole | null,
+  isPtudStaff = false
+): boolean {
+  if (isPtudStaff) return true;
   return !!role && CAN_READ_ASSIGNMENTS.includes(role);
 }
 

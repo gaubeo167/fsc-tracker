@@ -1247,7 +1247,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
   const { profile } = useAuth();
   const { showToast } = useToast();
   // Cán bộ nhà trường chỉ vào hệ thống để gửi yêu cầu hỗ trợ, không nhận việc.
-  const campusStaff = useCampusStaffUids(profile?.role);
+  const campusStaff = useCampusStaffUids(profile);
   const [isEditingMetadata, setIsEditingMetadata] = useState(false);
   const [projectName, setProjectName] = useState<string>('');
   const [editedTask, setEditedTask] = useState({ 
@@ -2555,7 +2555,7 @@ const Dashboard = ({
   const { showToast } = useToast();
   // Cán bộ nhà trường không phải nhân sự dự án — không đưa vào ô chọn thành viên,
   // vì thành viên dự án chính là nguồn của danh sách giao việc ở màn Task.
-  const campusStaff = useCampusStaffUids(profile?.role);
+  const campusStaff = useCampusStaffUids(profile);
   const [projects, setProjects] = useState<Project[]>([]);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -4389,7 +4389,7 @@ const TaskCreateModal = ({
   const { profile } = useAuth();
   const { showToast } = useToast();
   // Cán bộ nhà trường chỉ vào hệ thống để gửi yêu cầu hỗ trợ, không nhận việc.
-  const campusStaff = useCampusStaffUids(profile?.role);
+  const campusStaff = useCampusStaffUids(profile);
   const [projectId, setProjectId] = useState(initialProjectId || '');
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | null>(null);

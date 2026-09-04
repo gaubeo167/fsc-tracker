@@ -3,6 +3,7 @@ import type { UserRole } from '../../../types';
 import { watchRoleAssignments } from '../repository/userAdminRepository';
 import { canReadRoleAssignments } from '../services/assignableUsers';
 import { CAMPUS_SIDE_ROLES } from '../types';
+import { useSupportRole } from './useSupportRole';
 
 // ===========================================================================
 // Ai là cán bộ nhà trường — dùng để LOẠI họ khỏi các ô chọn người khi giao việc.
@@ -25,16 +26,20 @@ const EMPTY: ReadonlySet<string> = new Set<string>();
  * Tập uid của cán bộ nhà trường. Cập nhật theo thời gian thực vì admin gán và
  * gỡ vai trò ngay trong app.
  *
- * `role` là vai trò module Công việc của người đang đăng nhập. Ai không giao
- * việc được thì KHÔNG mở listener — xem canReadRoleAssignments().
+ * Nhận cả hồ sơ người đang đăng nhập vì quyền đọc bảng này có hai nguồn: vai
+ * trò module Công việc (`profile.role`) và vai trò hỗ trợ (PTUD hay không).
+ * Ai không đọc được thì KHÔNG mở listener — xem canReadRoleAssignments().
  *
  * Đọc hỏng (mất mạng) thì trả tập RỖNG, tức là không lọc ai cả. Mặc định an
  * toàn theo hướng không-thay-đổi: thà hiện thừa như trước còn hơn hiện ra một
  * danh sách trống và người dùng không giao được việc cho ai.
  */
-export function useCampusStaffUids(role?: UserRole | null): ReadonlySet<string> {
+export function useCampusStaffUids(
+  profile?: { uid?: string; role?: UserRole } | null
+): ReadonlySet<string> {
   const [uids, setUids] = useState<ReadonlySet<string>>(EMPTY);
-  const allowed = canReadRoleAssignments(role);
+  const { isPtudSide } = useSupportRole(profile?.uid);
+  const allowed = canReadRoleAssignments(profile?.role, isPtudSide);
 
   useEffect(() => {
     if (!allowed) {
