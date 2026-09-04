@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UserProfile } from '../../../types';
-import { filterAssignableUsers } from '../services/assignableUsers';
+import { canReadRoleAssignments, filterAssignableUsers } from '../services/assignableUsers';
 
 // ===========================================================================
 // Cán bộ nhà trường không được hiện ra ở các ô chọn người khi giao việc: họ vào
@@ -37,5 +37,29 @@ describe('filterAssignableUsers', () => {
   it('vẫn hiện cán bộ trường đã lỡ được gán vào task, để còn gỡ ra', () => {
     const con_lai = filterAssignableUsers(DANH_SACH, CAN_BO_TRUONG, ['gv-truong']).map((u) => u.uid);
     expect(con_lai).toEqual(['dev', 'gv-truong', 'quan-ly']);
+  });
+});
+
+// Regression: ISSUE-001 — hook mở listener support_role_assignments cho mọi tài
+// khoản; với cán bộ trường (không có quyền đọc) listener bị permission-denied
+// làm hỏng client Firestore của cả trang, menu hiện nhầm và màn hình trống.
+// Found by /qa on 2026-09-04
+// Report: .gstack/qa-reports/qa-report-localhost-3100-2026-09-04.md
+describe('canReadRoleAssignments', () => {
+  it('cho phép đúng các vai trò giao việc được', () => {
+    expect(canReadRoleAssignments('admin')).toBe(true);
+    expect(canReadRoleAssignments('manager')).toBe(true);
+    expect(canReadRoleAssignments('director')).toBe(true);
+  });
+
+  it('KHÔNG cho vai trò user — đây là cán bộ trường và nhân viên thường', () => {
+    expect(canReadRoleAssignments('user')).toBe(false);
+  });
+
+  it('KHÔNG cho khi chưa biết vai trò', () => {
+    // Hồ sơ tải xong sau lần render đầu. Mở listener ở nhịp đó là mở bằng
+    // quyền chưa xác định — đúng cái làm hỏng client Firestore.
+    expect(canReadRoleAssignments(undefined)).toBe(false);
+    expect(canReadRoleAssignments(null)).toBe(false);
   });
 });
