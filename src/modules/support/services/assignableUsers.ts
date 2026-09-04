@@ -1,4 +1,21 @@
-import type { UserProfile } from '../../../types';
+import type { UserProfile, UserRole } from '../../../types';
+
+/**
+ * Ai được phép ĐỌC bảng phân vai hỗ trợ — khớp đúng isTaskLeader() trong
+ * firestore.rules cộng admin.
+ *
+ * Phải chặn ở client chứ không phó mặc cho rules: một listener bị
+ * permission-denied KHÔNG chỉ trả về rỗng, nó làm hỏng luôn client Firestore
+ * của cả trang ("INTERNAL ASSERTION FAILED (ID: ca9)") và kéo sập mọi listener
+ * khác. Cán bộ trường mở app lên là màn hình trắng, menu hiện nhầm mục.
+ * Không mở listener còn hơn mở rồi bắt lỗi.
+ */
+const CAN_READ_ASSIGNMENTS: UserRole[] = ['admin', 'manager', 'director'];
+
+/** true khi tài khoản này đọc được support_role_assignments. */
+export function canReadRoleAssignments(role?: UserRole | null): boolean {
+  return !!role && CAN_READ_ASSIGNMENTS.includes(role);
+}
 
 /**
  * Bỏ cán bộ nhà trường khỏi danh sách người chọn được.

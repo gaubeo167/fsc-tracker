@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import type { UserRole } from '../../../types';
 import { watchRoleAssignments } from '../repository/userAdminRepository';
+import { canReadRoleAssignments } from '../services/assignableUsers';
 import { CAMPUS_SIDE_ROLES } from '../types';
 
 // ===========================================================================
@@ -23,15 +25,22 @@ const EMPTY: ReadonlySet<string> = new Set<string>();
  * Tập uid của cán bộ nhà trường. Cập nhật theo thời gian thực vì admin gán và
  * gỡ vai trò ngay trong app.
  *
- * Đọc hỏng (mất mạng, hoặc rules chặn với tài khoản không phải quản lý) thì trả
- * tập RỖNG, tức là không lọc ai cả. Mặc định an toàn theo hướng không-thay-đổi:
- * thà hiện thừa như trước còn hơn hiện ra một danh sách trống và người dùng
- * không giao được việc cho ai.
+ * `role` là vai trò module Công việc của người đang đăng nhập. Ai không giao
+ * việc được thì KHÔNG mở listener — xem canReadRoleAssignments().
+ *
+ * Đọc hỏng (mất mạng) thì trả tập RỖNG, tức là không lọc ai cả. Mặc định an
+ * toàn theo hướng không-thay-đổi: thà hiện thừa như trước còn hơn hiện ra một
+ * danh sách trống và người dùng không giao được việc cho ai.
  */
-export function useCampusStaffUids(): ReadonlySet<string> {
+export function useCampusStaffUids(role?: UserRole | null): ReadonlySet<string> {
   const [uids, setUids] = useState<ReadonlySet<string>>(EMPTY);
+  const allowed = canReadRoleAssignments(role);
 
   useEffect(() => {
+    if (!allowed) {
+      setUids(EMPTY);
+      return;
+    }
     return watchRoleAssignments(
       (rows) =>
         setUids(
@@ -43,7 +52,7 @@ export function useCampusStaffUids(): ReadonlySet<string> {
         ),
       () => setUids(EMPTY)
     );
-  }, []);
+  }, [allowed]);
 
   return uids;
 }
