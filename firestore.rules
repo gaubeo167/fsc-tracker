@@ -352,9 +352,10 @@ service cloud.firestore {
     // Người dùng tự ghi được là tự gán mình vào trường khác và đọc dữ liệu
     // trường đó — đúng thứ quy tắc cứng §3 cấm.
     //
-    // Đọc: tự đọc bản ghi của mình (để biết mình thuộc trường nào), admin đọc tất.
-    // Query cả collection chỉ chạy được với admin, vì điều kiện
-    // request.auth.uid == uid không giải được khi list.
+    // Đọc: tự đọc bản ghi của mình (để biết mình thuộc trường nào); admin, nhân
+    // sự PTUD và quản lý/giám đốc đọc tất. Query cả collection chỉ chạy được
+    // với ba nhóm sau, vì điều kiện request.auth.uid == uid không giải được khi
+    // list.
     match /support_role_assignments/{uid} {
       // Nhân sự PTUD liệt kê được cả collection: họ cần danh sách đồng nghiệp
       // để chọn người xử lý khi tiếp nhận phiếu. Không mở thì màn tiếp nhận báo
@@ -363,7 +364,11 @@ service cloud.firestore {
       // Dữ liệu ở đây không nhạy cảm: uid, mã trường, tên vai trò. Không có
       // thông tin cá nhân nào ngoài những thứ đã nằm ở collection users vốn
       // mọi tài khoản đăng nhập đều đọc được.
-      allow read: if isAdmin() || isPtudStaff() || (isAuthenticated() && request.auth.uid == uid);
+      //
+      // Quản lý/giám đốc module Công việc đọc được vì lý do ngược lại: họ cần
+      // biết ai là cán bộ trường để KHÔNG hiện người đó ra khi giao việc.
+      allow read: if isAdmin() || isPtudStaff() || isTaskLeader()
+                     || (isAuthenticated() && request.auth.uid == uid);
 
       // Duyệt trước: thư mời có ghi loại thành viên và trường thì người đó tự
       // tạo được bản gán CỦA CHÍNH MÌNH, đúng bằng những gì admin đã ghi.
@@ -410,6 +415,24 @@ service cloud.firestore {
     function isPtudStaff() {
       let a = myAssignment();
       return a != null && a.supportRole in ['MODULE_OWNER', 'DEVELOPER', 'PTUD_MANAGER', 'SYS_ADMIN'];
+    }
+
+    /**
+     * Người đi giao việc ở module Công việc: quản lý và giám đốc.
+     *
+     * Chỉ dùng để CHO ĐỌC support_role_assignments, không mở thêm quyền nào
+     * khác. Lý do: màn giao việc phải biết ai là cán bộ trường để loại khỏi ô
+     * "Người thực hiện". Quản lý không phải lúc nào cũng là nhân sự PTUD — tám
+     * tài khoản có sẵn chưa ai được gán vai trò hỗ trợ — nên nếu chỉ có
+     * isPtudStaff() thì đúng những người giao việc nhiều nhất lại đọc hỏng và
+     * danh sách quay về trộn lẫn như cũ.
+     *
+     * Cán bộ trường KHÔNG lọt vào đây: role của họ ở module Công việc là 'user'.
+     */
+    function isTaskLeader() {
+      let data = getUserData();
+      return isAuthenticated() && data != null && data.status == 'active'
+             && (data.role == 'manager' || data.role == 'director');
     }
 
     // =============================================================

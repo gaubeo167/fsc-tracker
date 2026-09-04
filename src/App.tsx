@@ -129,6 +129,8 @@ import { SupportAdminView } from './modules/support/components/admin/SupportAdmi
 import { SupportView } from './modules/support/components/SupportView';
 import { PtudSupportView } from './modules/support/components/PtudSupportView';
 import { useSupportRole } from './modules/support/hooks/useSupportRole';
+import { useCampusStaffUids } from './modules/support/hooks/useCampusStaff';
+import { filterAssignableUsers } from './modules/support/services/assignableUsers';
 import { useNavBadges } from './modules/support/hooks/useNavBadges';
 import { finishInvitation, readUsableInvitation } from './modules/support/repository/invitationRepository';
 
@@ -1244,6 +1246,8 @@ const NotificationCenter = () => {
 const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: Task; users: UserProfile[]; projectManagers?: string[]; onClose: () => void }) => {
   const { profile } = useAuth();
   const { showToast } = useToast();
+  // Cán bộ nhà trường chỉ vào hệ thống để gửi yêu cầu hỗ trợ, không nhận việc.
+  const campusStaff = useCampusStaffUids();
   const [isEditingMetadata, setIsEditingMetadata] = useState(false);
   const [projectName, setProjectName] = useState<string>('');
   const [editedTask, setEditedTask] = useState({ 
@@ -1885,7 +1889,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                   <div className="flex flex-wrap gap-2">
                     {isEditingMetadata ? (
                       <div className="w-full max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-slate-50">
-                        {users.map(u => (
+                        {filterAssignableUsers(users, campusStaff, editedTask.assignees || []).map(u => (
                           <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-white rounded cursor-pointer transition-colors">
                             <input 
                               type="checkbox" 
@@ -1920,7 +1924,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                   <div className="flex flex-wrap gap-2">
                     {isEditingMetadata ? (
                       <div className="w-full max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-slate-50">
-                        {users.filter(u => u.role === 'admin' || u.role === 'manager' || u.role === 'director').map(u => (
+                        {filterAssignableUsers(users.filter(u => u.role === 'admin' || u.role === 'manager' || u.role === 'director'), campusStaff, editedTask.reviewers || []).map(u => (
                           <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-white rounded cursor-pointer transition-colors">
                             <input 
                               type="checkbox" 
@@ -1956,7 +1960,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                   <div className="flex flex-wrap gap-2">
                     {isEditingMetadata ? (
                       <div className="w-full max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-slate-50">
-                        {users.map(u => (
+                        {filterAssignableUsers(users, campusStaff, editedTask.cc || []).map(u => (
                           <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-white rounded cursor-pointer transition-colors">
                             <input 
                               type="checkbox" 
@@ -2549,6 +2553,9 @@ const Dashboard = ({
 }) => {
   const { profile } = useAuth();
   const { showToast } = useToast();
+  // Cán bộ nhà trường không phải nhân sự dự án — không đưa vào ô chọn thành viên,
+  // vì thành viên dự án chính là nguồn của danh sách giao việc ở màn Task.
+  const campusStaff = useCampusStaffUids();
   const [projects, setProjects] = useState<Project[]>([]);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -3162,7 +3169,7 @@ const Dashboard = ({
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Gán Manager</label>
                   <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1">
-                    {users.filter(u => u.role === 'manager' || u.role === 'admin' || u.role === 'director').map(u => (
+                    {filterAssignableUsers(users.filter(u => u.role === 'manager' || u.role === 'admin' || u.role === 'director'), campusStaff, newProject.managers).map(u => (
                       <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-slate-50 rounded cursor-pointer">
                         <input 
                           type="checkbox" 
@@ -3183,7 +3190,7 @@ const Dashboard = ({
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Thành viên dự án</label>
                   <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1">
-                    {users.map(u => (
+                    {filterAssignableUsers(users, campusStaff, newProject.members).map(u => (
                       <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-slate-50 rounded cursor-pointer">
                         <input 
                           type="checkbox" 
@@ -3254,7 +3261,7 @@ const Dashboard = ({
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Quản lý bởi</label>
                   <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1">
-                    {users.filter(u => u.role === 'manager' || u.role === 'admin' || u.role === 'director').map(u => (
+                    {filterAssignableUsers(users.filter(u => u.role === 'manager' || u.role === 'admin' || u.role === 'director'), campusStaff, editingProject.managers || []).map(u => (
                       <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-slate-50 rounded cursor-pointer">
                         <input 
                           type="checkbox" 
@@ -3276,7 +3283,7 @@ const Dashboard = ({
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Thành viên dự án</label>
                   <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1">
-                    {users.map(u => (
+                    {filterAssignableUsers(users, campusStaff, editingProject.members || []).map(u => (
                       <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-slate-50 rounded cursor-pointer">
                         <input 
                           type="checkbox" 
@@ -4381,6 +4388,8 @@ const TaskCreateModal = ({
 }) => {
   const { profile } = useAuth();
   const { showToast } = useToast();
+  // Cán bộ nhà trường chỉ vào hệ thống để gửi yêu cầu hỗ trợ, không nhận việc.
+  const campusStaff = useCampusStaffUids();
   const [projectId, setProjectId] = useState(initialProjectId || '');
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | null>(null);
@@ -4679,7 +4688,7 @@ const TaskCreateModal = ({
                 </div>
               ) : (
                 <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-slate-50">
-                  {users.map(u => (
+                  {filterAssignableUsers(users, campusStaff, newTask.assignees || []).map(u => (
                     <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-white rounded cursor-pointer transition-colors">
                       <input 
                         type="checkbox" 
@@ -4703,7 +4712,7 @@ const TaskCreateModal = ({
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Người phê duyệt (Reviewers)</label>
               <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-slate-50">
-                {users.filter(u => (project?.managers || []).includes(u.uid) || u.role === 'admin').map(u => (
+                {filterAssignableUsers(users.filter(u => (project?.managers || []).includes(u.uid) || u.role === 'admin'), campusStaff, newTask.reviewers).map(u => (
                   <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-white rounded cursor-pointer transition-colors">
                     <input 
                       type="checkbox" 
@@ -4724,7 +4733,7 @@ const TaskCreateModal = ({
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Theo dõi (CC)</label>
               <div className="max-h-32 overflow-y-auto border rounded-lg p-2 space-y-1 bg-slate-50">
-                {users.map(u => (
+                {filterAssignableUsers(users, campusStaff, newTask.cc).map(u => (
                   <label key={u.uid} className="flex items-center gap-2 text-xs p-1 hover:bg-white rounded cursor-pointer transition-colors">
                     <input 
                       type="checkbox" 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getMyAssignment } from '../repository/userAdminRepository';
+import { CAMPUS_SIDE_ROLES } from '../types';
 import type { SupportRole, SupportRoleAssignment } from '../types';
 
 // ===========================================================================
@@ -13,9 +14,6 @@ import type { SupportRole, SupportRoleAssignment } from '../types';
 // hiện mục nào. Trạng thái `loading` dưới đây tồn tại vì lý do đó — không có nó
 // thì menu sẽ nhấp nháy: hiện đủ mục rồi đột ngột mất bớt.
 // ===========================================================================
-
-/** Vai trò phía trường — chỉ gửi và theo dõi yêu cầu, không làm task. */
-const CAMPUS_SIDE_ROLES: SupportRole[] = ['CAMPUS_REPORTER', 'CAMPUS_FOCAL'];
 
 /** Vai trò phía PTUD — làm task, xử lý yêu cầu. */
 const PTUD_SIDE_ROLES: SupportRole[] = [

@@ -22,6 +22,8 @@ const PROJECT_ID = 'fsc-tracker-support-rules-test';
 const ADMIN = 'admin-uid';
 const APPROVED = 'da-duyet-uid';
 const PENDING = 'cho-duyet-uid';
+/** Quản lý module Công việc, KHÔNG được gán vai trò hỗ trợ nào. */
+const QUAN_LY = 'quan-ly-uid';
 
 let testEnv: RulesTestEnvironment;
 
@@ -59,6 +61,10 @@ beforeEach(async () => {
     await setDoc(doc(db, 'users', ADMIN), profile(ADMIN, { role: 'admin', status: 'active' }));
     await setDoc(doc(db, 'users', APPROVED), profile(APPROVED, { status: 'active' }));
     await setDoc(doc(db, 'users', PENDING), profile(PENDING));
+    await setDoc(
+      doc(db, 'users', QUAN_LY),
+      profile(QUAN_LY, { role: 'manager', status: 'active' })
+    );
     await setDoc(doc(db, 'support_campuses', 'HN01'), {
       id: 'HN01',
       code: 'HN01',
@@ -163,6 +169,14 @@ describe('support_role_assignments — cách ly campus', () => {
   it('người dùng thường KHÔNG liệt kê được cả collection', async () => {
     const db = testEnv.authenticatedContext(APPROVED).firestore();
     await assertFails(getDocs(collection(db, 'support_role_assignments')));
+  });
+
+  it('quản lý module Công việc liệt kê được, để loại cán bộ trường khi giao việc', async () => {
+    // Màn giao việc chỉ hiện cán bộ phụ trách và nhân viên dự án. Muốn loại cán
+    // bộ trường ra thì phải biết ai là cán bộ trường, mà quản lý thì không chắc
+    // có vai trò hỗ trợ nào — chặn ở đây là danh sách quay về trộn lẫn như cũ.
+    const db = testEnv.authenticatedContext(QUAN_LY).firestore();
+    await assertSucceeds(getDocs(collection(db, 'support_role_assignments')));
   });
 
   it('admin liệt kê được cả collection để dựng hàng đợi duyệt', async () => {

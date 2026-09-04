@@ -64,6 +64,17 @@ export const SUPPORT_ROLES: SupportRole[] = [
 export const ROLES_REQUIRING_CAMPUS: SupportRole[] = ['CAMPUS_REPORTER', 'CAMPUS_FOCAL'];
 
 /**
+ * Vai trò phía trường: chỉ gửi và theo dõi yêu cầu hỗ trợ, KHÔNG làm task.
+ *
+ * Danh sách này là nguồn duy nhất cho hai việc: quyết định menu người đó thấy
+ * (useSupportRole) và loại họ khỏi mọi ô chọn người khi giao việc bên module
+ * Công việc (useCampusStaffUids). Để hai nơi tự chép lại danh sách thì thêm một
+ * vai trò phía trường thứ ba là sót đúng một chỗ, và cán bộ trường lại hiện ra
+ * trong danh sách người thực hiện.
+ */
+export const CAMPUS_SIDE_ROLES: SupportRole[] = ['CAMPUS_REPORTER', 'CAMPUS_FOCAL'];
+
+/**
  * Campus. KHÔNG seed cứng 18 trường — đây là dữ liệu do SYS_ADMIN tự tạo
  * trong sản phẩm, vì danh sách và mã trường là thứ chỉ phía nghiệp vụ chốt được.
  */
