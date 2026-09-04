@@ -56,6 +56,18 @@ describe('canReadRoleAssignments', () => {
     expect(canReadRoleAssignments('user')).toBe(false);
   });
 
+  // Regression: ISSUE-002 — nhân viên dự án (role 'user' + vai trò PTUD) bị bản
+  // vá ISSUE-001 chặn nhầm, nên ô CC ở màn tạo công việc lại liệt kê cán bộ trường.
+  // Found by /qa on 2026-09-04
+  // Report: .gstack/qa-reports/qa-report-localhost-3100-2026-09-04.md
+  it('cho nhân sự PTUD dù vai trò module Công việc chỉ là user', () => {
+    expect(canReadRoleAssignments('user', true)).toBe(true);
+  });
+
+  it('vẫn KHÔNG cho cán bộ trường — họ không phải nhân sự PTUD', () => {
+    expect(canReadRoleAssignments('user', false)).toBe(false);
+  });
+
   it('KHÔNG cho khi chưa biết vai trò', () => {
     // Hồ sơ tải xong sau lần render đầu. Mở listener ở nhịp đó là mở bằng
     // quyền chưa xác định — đúng cái làm hỏng client Firestore.
