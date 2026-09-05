@@ -16,36 +16,76 @@ service firebase.storage {
   match /b/{bucket}/o {
 
     // ------------------------------------------------------------------
-    // Trợ giúp. Storage rules đọc được Firestore qua firestore.get().
-    // Mỗi lượt gọi là một lượt đọc TÍNH TIỀN, nên chỉ gọi khi thật cần.
+    // Trợ giúp. Storage rules đọc được Firestore qua firestore.get()
+    // (cross-service rules).
+    //
+    // ⚠️ TRẦN CỨNG: MỖI LƯỢT ĐÁNH GIÁ RULES CHỈ ĐỌC ĐƯỢC TỐI ĐA 2 DOCUMENT.
+    // Vượt trần thì lượt đánh giá HỎNG, và rules hỏng nghĩa là TỪ CHỐI.
+    //
+    // Emulator KHÔNG áp trần này. Đó là lý do bản trước sống sót qua mọi test
+    // local mà production từ chối 100% lượt tải ảnh lên kể từ ngày mở tính
+    // năng: bucket không nhận được một file nào, 14 phiếu không phiếu nào có
+    // ảnh, trong khi test rules ở máy thì xanh hết. Triệu chứng phía người
+    // dùng là "Không có quyền tải lên" — trông y hệt lỗi phân quyền, nên nó
+    // dẫn người đi sửa sang hướng tài khoản/vai trò.
+    //
+    // Bản cũ tiêu 3 lượt đọc cho một lượt GHI (users, exists + get bản gán —
+    // exists rồi get lại CÙNG một document vẫn là HAI lượt), và tới 5 lượt cho
+    // một lượt ĐỌC.
+    //
+    // Vì vậy luật bất di bất dịch của file này:
+    //   1. Mỗi hàm dưới đây gọi ĐÚNG MỘT firestore.get.
+    //   2. Mỗi câu allow gọi TỐI ĐA HAI hàm đó.
+    //   3. Không bao giờ exists() rồi get() lại cùng một document.
+    // Thêm một lượt đọc thứ ba là làm hỏng lại đúng cách cũ, và test local sẽ
+    // KHÔNG bắt được. Có test tĩnh canh điều này ở rules.storage.test.ts.
     // ------------------------------------------------------------------
 
-    function assignment() {
-      return firestore.get(
-        /databases/(default)/documents/support_role_assignments/$(request.auth.uid)
-      ).data;
-    }
-
-    function hasAssignment() {
-      return request.auth != null && firestore.exists(
-        /databases/(default)/documents/support_role_assignments/$(request.auth.uid)
-      );
-    }
-
-    /** Nhân sự PTUD xem được ảnh của mọi trường — họ là người sửa lỗi. */
-    function isPtudStaff() {
-      return hasAssignment() &&
-        assignment().supportRole in ['MODULE_OWNER', 'DEVELOPER', 'PTUD_MANAGER', 'SYS_ADMIN'];
-    }
-
-    function myCampusId() {
-      return hasAssignment() ? assignment().campusId : null;
-    }
-
-    function isApprovedUser() {
+    /**
+     * Hồ sơ người dùng — MỘT lượt đọc.
+     *
+     * .get('status', '') chứ không phải .status: hồ sơ cũ có thể thiếu hẳn
+     * field này, và đọc thẳng field không tồn tại làm lượt đánh giá hỏng.
+     * Hỏng cũng ra "từ chối", nhưng là từ chối kèm lỗi runtime khó lần.
+     */
+    function daDuyet() {
       return request.auth != null && firestore.get(
         /databases/(default)/documents/users/$(request.auth.uid)
-      ).data.status == 'active';
+      ).data.get('status', '') == 'active';
+    }
+
+    /**
+     * Bản gán quyền hỗ trợ — MỘT lượt đọc, trả lời cả hai câu hỏi của lượt xem:
+     * "có phải nhân sự PTUD không" (họ xem được ảnh mọi trường vì họ là người
+     * sửa lỗi) và "có đúng trường mình không".
+     *
+     * Hai câu đó trước đây là hai hàm, mỗi hàm tự đọc lại document — cùng một
+     * document, hai lượt đọc. Gộp vào một `let` là cách duy nhất hỏi cả hai mà
+     * chỉ tiêu một suất trong trần 2 document.
+     *
+     * Không có bản gán (admin chẳng hạn) thì firestore.get trả null, lượt đánh
+     * giá hỏng và kết quả là TỪ CHỐI — đúng ý muốn. Không dùng exists() để làm
+     * cho đẹp, vì đó là lượt đọc thứ hai lên cùng một document.
+     */
+    function xemDuocAnhCua(campusId) {
+      let banGan = firestore.get(
+        /databases/(default)/documents/support_role_assignments/$(request.auth.uid)
+      ).data;
+      return banGan.get('supportRole', '') in
+               ['MODULE_OWNER', 'DEVELOPER', 'PTUD_MANAGER', 'SYS_ADMIN']
+             || banGan.get('campusId', '') == campusId;
+    }
+
+    /**
+     * Được ghi vào thư mục của trường nào — MỘT lượt đọc.
+     *
+     * Nhân sự PTUD (campusId = null) KHÔNG ghi được vào thư mục trường nào, y
+     * như bản cũ: họ là người xử lý phiếu, không phải người gửi phiếu.
+     */
+    function ghiDuocVaoTruong(campusId) {
+      return firestore.get(
+        /databases/(default)/documents/support_role_assignments/$(request.auth.uid)
+      ).data.get('campusId', '') == campusId;
     }
 
     // Chốt chặn mặc định.
@@ -70,7 +110,7 @@ service firebase.storage {
     match /support-tickets/{campusId}/{draftId}/{fileName} {
 
       //
-      // isApprovedUser() BẮT BUỘC phải có ở đây, không chỉ ở nhánh write.
+      // daDuyet() BẮT BUỘC phải có ở đây, không chỉ ở nhánh ghi.
       //
       // Tắt hoặc xoá một tài khoản KHÔNG xoá bản ghi support_role_assignments
       // của họ (App.tsx đổi users.status, rejectUser đổi sang 'disabled'; chỉ
@@ -80,16 +120,28 @@ service firebase.storage {
       //
       // Đây là dữ liệu nhạy cảm nhất trong hệ thống: ảnh chụp màn hình điểm
       // danh, bảng điểm, hồ sơ y tế có tên học sinh (§12, Nghị định 13/2023).
-      allow read: if isApprovedUser() && (isPtudStaff() || myCampusId() == campusId);
+      // Đúng 2 lượt đọc Firestore: hồ sơ + bản gán. Xem trần 2 document ở đầu file.
+      allow read: if daDuyet() && xemDuocAnhCua(campusId);
 
-      allow write: if request.auth != null
-                   && isApprovedUser()
-                   // Chỉ ghi được vào thư mục của TRƯỜNG MÌNH. Không có dòng
-                   // này thì bất kỳ ai cũng nhét ảnh vào thư mục trường khác.
-                   && myCampusId() == campusId
+      // `create, update` chứ KHÔNG phải `write`.
+      //
+      // `write` gộp cả delete, mà rules là phép HOẶC giữa các câu allow — nên
+      // `allow write` ở đây làm câu `allow delete: if false` bên dưới thành vô
+      // nghĩa. Trước đây lượt xoá vẫn bị chặn, nhưng bằng TAI NẠN: request.resource
+      // là null khi xoá nên phép kiểm dung lượng làm hỏng lượt đánh giá. Đổi thứ
+      // tự các vế là mở toang đường xoá mà không ai thấy.
+      //
+      // Thứ tự các vế cũng có chủ ý: mọi phép kiểm KHÔNG TỐN TIỀN đứng trước hai
+      // lượt đọc Firestore, để file quá nặng hay sai định dạng bị chặn mà không
+      // phải trả tiền cho lượt đọc nào.
+      allow create, update: if request.auth != null
                    // §10: tối đa 10MB mỗi file.
                    && request.resource.size <= 10 * 1024 * 1024
-                   && isAllowedType();
+                   && isAllowedType()
+                   && daDuyet()
+                   // Chỉ ghi được vào thư mục của TRƯỜNG MÌNH. Không có dòng
+                   // này thì bất kỳ ai cũng nhét ảnh vào thư mục trường khác.
+                   && ghiDuocVaoTruong(campusId);
 
       /**
        * Ảnh (báo lỗi) và tài liệu (đề xuất tính năng).
