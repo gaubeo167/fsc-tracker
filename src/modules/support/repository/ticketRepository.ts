@@ -233,6 +233,11 @@ export async function createTicket(input: CreateTicketInput): Promise<Ticket> {
       linkedTaskId: null,
       rejectionReason: '',
       needsInfoRequest: '',
+      // Chưa ai nói câu nào. Ghi sẵn null thay vì bỏ trống để rules và giao diện
+      // không phải phân biệt "chưa có trao đổi" với "field chưa tồn tại".
+      lastMessageAt: null,
+      lastMessageBy: null,
+      lastMessageSide: null,
       contactName: (input.contactName ?? '').trim(),
       contactEmail: (input.contactEmail ?? '').trim().toLowerCase(),
       attachments: input.attachments ?? [],
@@ -310,6 +315,10 @@ function normalizeTicket(id: string, raw: unknown): Ticket {
     estimateDays: Number(d.estimateDays ?? 0),
     needsInfoRequest: String(d.needsInfoRequest ?? ''),
     rejectionReason: String(d.rejectionReason ?? ''),
+    // Phiếu tạo trước khi có mục trao đổi không mang ba field này.
+    lastMessageAt: d.lastMessageAt != null ? Number(d.lastMessageAt) : null,
+    lastMessageBy: (d.lastMessageBy as string) ?? null,
+    lastMessageSide: (d.lastMessageSide as Ticket['lastMessageSide']) ?? null,
   };
 }
 
@@ -1425,6 +1434,12 @@ export async function requestMoreInfo(input: {
       needsInfoRequest: request,
       // Nhớ ai hỏi, để lúc trường trả lời còn biết báo cho đúng người.
       needsInfoBy: input.actorUid,
+      // Câu hỏi này cũng là một lượt trao đổi, nên phải để lại đúng dấu vết như
+      // mọi tin nhắn khác — nếu không, danh sách phiếu nói "chưa có trao đổi"
+      // trong khi luồng đã có câu hỏi nằm đó.
+      lastMessageAt: now,
+      lastMessageBy: input.actorUid,
+      lastMessageSide: nguoiHoi.side,
       // Dừng đồng hồ SLA: thời gian chờ trường trả lời không phải lỗi của đội
       // xử lý. Nhưng quãng vừa chạy phải được CỘNG DỒN lại, không thì nó biến mất.
       slaLastResumedAt: null,

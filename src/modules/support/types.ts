@@ -340,6 +340,24 @@ export interface Ticket {
   affectedCampusIds: string[];
   watcherUids: string[];
 
+  /**
+   * Dấu vết của lượt trao đổi gần nhất, chép lên chính phiếu.
+   *
+   * Vì sao phải nhân bản dữ liệu của subcollection lên đây: danh sách phiếu
+   * không đọc subcollection được (Firestore không join). Không có ba field này
+   * thì một cuộc trao đổi đang diễn ra là VÔ HÌNH ở mọi màn danh sách — người
+   * được hỏi không biết mình đang được hỏi, và câu hỏi nằm im tới khi có ai
+   * tình cờ mở phiếu ra. Người dùng báo đúng chuyện đó ngày 06/09/2026.
+   *
+   * CỐ Ý không có messageCount: đếm thì mỗi lượt gửi phải đọc-rồi-cộng, hai
+   * người nhắn cùng lúc là một lượt ghi hỏng, mà lượt ghi đó nằm chung batch
+   * với tin nhắn nên hỏng luôn cả tin. Thời điểm và phía gửi đã đủ để hiện
+   * "bên kia vừa nhắn".
+   */
+  lastMessageAt: number | null;
+  lastMessageBy: string | null;
+  lastMessageSide: 'CAMPUS' | 'PTUD' | null;
+
   normalizedTitle: string;
   titleTokens: string[];
   bodyTokens: string[];

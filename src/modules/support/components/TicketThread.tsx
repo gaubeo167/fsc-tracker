@@ -117,6 +117,11 @@ export function TicketThread({
         body: draft,
         attachments,
         author: { uid: actorUid, name: me.name, side: me.side },
+        // Ai đã nói trong luồng thì cũng cần được báo. Danh sách này lấy từ
+        // chính các tin đang hiển thị nên không tốn thêm lượt đọc nào, và nó
+        // phủ được người mà vai trò trên phiếu bỏ sót — điển hình là admin vào
+        // hỏi một câu rồi không bao giờ nhận được câu trả lời.
+        participants: (messages ?? []).map((m) => m.authorUid),
       });
       if (!ok) {
         onToast(error?.kind === 'denied' ? vi.errors.permissionDenied : vi.errors.saveFailed, 'error');

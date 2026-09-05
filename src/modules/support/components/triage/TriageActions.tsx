@@ -514,8 +514,8 @@ export function TriageActions({
           <label className="block">
             <Nhan icon={mode === 'reject' ? <X size={ICON.sm} /> : <HelpCircle size={ICON.sm} />} bat>
               {mode === 'reject'
-                ? 'Lý do từ chối — trường sẽ đọc được nội dung này'
-                : 'Cần trường bổ sung thông tin gì?'}
+                ? 'Lý do từ chối — trường sẽ đọc được nội dung này (tối thiểu 10 ký tự)'
+                : 'Cần trường bổ sung thông tin gì? (tối thiểu 10 ký tự)'}
             </Nhan>
             <textarea
               rows={2}
@@ -527,9 +527,17 @@ export function TriageActions({
                 : 'Ví dụ: Gửi giúp ảnh chụp màn hình lúc gặp lỗi và mã lớp bị ảnh hưởng.'}
               className={cn(O_NHAP, 'resize-y')}
             />
-            <span className="mt-1.5 block text-[12px] leading-[1.35] tracking-[-0.01em] text-slate-500">
+            {/* Chưa đủ chữ thì nói thẳng là NÚT ĐANG KHOÁ, và tô đỏ.
+                Bản cũ chỉ ghi "Còn thiếu 3 ký tự" bằng chữ xám nhỏ dưới ô, nên
+                người dùng thấy nút mờ đi và kết luận tính năng hỏng — đúng
+                chuyện đã xảy ra ngày 06/09/2026. Đếm ngược thì đúng, nhưng nó
+                không nói cho ai biết vì sao bấm không được. */}
+            <span className={cn(
+              'mt-1.5 block text-[12px] leading-[1.35] tracking-[-0.01em]',
+              reason.trim().length < 10 ? 'font-medium text-red-600' : 'text-slate-500'
+            )}>
               {reason.trim().length < 10
-                ? `Còn thiếu ${10 - reason.trim().length} ký tự`
+                ? `Cần thêm ${10 - reason.trim().length} ký tự nữa mới bấm được nút bên dưới.`
                 : mode === 'reject'
                   ? 'Phiếu sẽ đóng lại. Trường không gửi lại được phiếu này, chỉ tạo phiếu mới.'
                   : 'Phiếu quay về trường để bổ sung. Đồng hồ SLA tạm dừng trong lúc chờ.'}
@@ -540,6 +548,9 @@ export function TriageActions({
               size="sm"
               variant={mode === 'reject' ? 'danger' : 'primary'}
               disabled={busy || reason.trim().length < 10}
+              title={reason.trim().length < 10
+                ? `Cần ít nhất 10 ký tự lý do, đang có ${reason.trim().length}`
+                : undefined}
               onClick={() => submitReason(mode as 'reject' | 'info')}
             >
               {busy ? 'Đang gửi…'

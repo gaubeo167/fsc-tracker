@@ -1,12 +1,12 @@
 import {
   AlertTriangle, BookOpen, Bug, CheckCircle2, CircleDollarSign, Clock, Globe,
   HeartPulse, HelpCircle, Lightbulb, Loader2, PauseCircle, RotateCcw,
-  Smartphone, XCircle, Copy as CopyIcon,
+  MessagesSquare, Smartphone, XCircle, Copy as CopyIcon,
 } from 'lucide-react';
 import { useSupportModules } from '../hooks/useSupportModules';
 import React from 'react';
 import { Badge, cn } from '../../../components/ui';
-import type { TicketPriority, TicketStatus, TicketType } from '../types';
+import type { Ticket, TicketPriority, TicketStatus, TicketType } from '../types';
 
 // ===========================================================================
 // Token giao diện của module hỗ trợ.
@@ -344,3 +344,49 @@ export const TABLE = {
   row: 'cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50',
   cell: 'px-3.5 py-3.5 first:pl-5 last:pr-5',
 } as const;
+
+/**
+ * Dấu hiệu "phiếu này đang có trao đổi", hiện trong các màn danh sách.
+ *
+ * Vì sao cần: cuộc trao đổi nằm ở subcollection, mà danh sách phiếu không đọc
+ * subcollection được (Firestore không join). Không có con chip này thì một câu
+ * hỏi đang chờ trả lời là VÔ HÌNH cho tới khi ai đó tình cờ mở phiếu ra — người
+ * dùng báo đúng chuyện đó ngày 06/09/2026: "cần có note tại yêu cầu để người
+ * dùng biết là đang có sự trao đổi và vào trả lời".
+ *
+ * Nổi bật khi lượt cuối là của PHÍA BÊN KIA: đó mới là thứ cần hành động. Tin
+ * cuối là của chính mình thì chỉ hiện mờ, vì nó nghĩa là đang chờ người ta.
+ */
+export function MessageChip({
+  ticket,
+  viewerSide,
+  className,
+}: {
+  ticket: Pick<Ticket, 'lastMessageAt' | 'lastMessageSide'>;
+  /** Người đang nhìn danh sách đứng ở phía nào. */
+  viewerSide: 'CAMPUS' | 'PTUD';
+  className?: string;
+}) {
+  if (!ticket.lastMessageAt) return null;
+  const cuaBenKia = !!ticket.lastMessageSide && ticket.lastMessageSide !== viewerSide;
+  const d = new Date(ticket.lastMessageAt + 7 * 3600_000);
+  const khi = `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] tracking-[-0.01em]',
+        cuaBenKia
+          ? 'bg-amber-50 font-medium text-amber-800'
+          : 'bg-slate-100 text-slate-500',
+        className
+      )}
+      title={`Lượt trao đổi gần nhất: ${khi}`}
+    >
+      <MessagesSquare size={ICON.sm} className="shrink-0" />
+      {cuaBenKia
+        ? ticket.lastMessageSide === 'CAMPUS' ? 'Trường vừa nhắn' : 'Kỹ thuật vừa nhắn'
+        : 'Đang chờ trả lời'}
+      <span className="font-normal opacity-70">· {khi}</span>
+    </span>
+  );
+}

@@ -1,7 +1,7 @@
 import { Filter, Inbox } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Badge, Card, StateBlock, cn } from '../../../../components/ui';
-import {
+import { MessageChip,
   DueCell, ICON, ModuleCell, OPEN_STATUSES, PriorityBadge, StatusBadge, TABLE, TypeBadge,
   TypeFilterChips,
 } from '../../ui/tokens';
@@ -218,7 +218,10 @@ export function AllTicketsView({
                     <td className={cn(TABLE.cell, 'max-w-sm')}>
                       <span className="line-clamp-1 text-slate-800">{t.title}</span>
                     </td>
-                    <td className={TABLE.cell}><StatusBadge status={t.status} /></td>
+                    <td className={TABLE.cell}>
+                      <StatusBadge status={t.status} />
+                      <MessageChip ticket={t} viewerSide="PTUD" className="mt-1" />
+                    </td>
                     <td className={TABLE.cell}>
                       {t.priority ? <PriorityBadge priority={t.priority} /> : <span className="text-xs text-slate-300">—</span>}
                     </td>

@@ -215,3 +215,53 @@ describe('quyền đọc trao đổi không được lệch khỏi quyền đọ
     expect(khoiMessages).toContain('SYSTEM_WIDE');
   });
 });
+
+// ===========================================================================
+// Dấu vết trao đổi trên chính phiếu.
+//
+// Danh sách phiếu không đọc được subcollection (Firestore không join), nên
+// không có ba field này thì cuộc trao đổi vô hình ở mọi màn danh sách. Cán bộ
+// trường cũng gửi tin, nên họ PHẢI ghi được ba field đó lên phiếu — mà đây lại
+// là lối duy nhất cho phép phía trường chạm vào document phiếu ngoài đường sửa
+// nội dung. Bốn test dưới khoá đúng cái cửa đó lại.
+// ===========================================================================
+describe('dấu vết trao đổi trên phiếu', () => {
+  const dauVet = (uid: string) => ({
+    lastMessageAt: 123, lastMessageBy: uid, lastMessageSide: 'CAMPUS',
+  });
+
+  it('cán bộ trường đánh dấu được trên phiếu của trường mình', async () => {
+    const db = env.authenticatedContext(GV).firestore();
+    await assertSucceeds(updateDoc(doc(db, 'support_tickets', 't1'), dauVet(GV)));
+  });
+
+  it('nhân sự PTUD đánh dấu được', async () => {
+    const db = env.authenticatedContext(DEV).firestore();
+    await assertSucceeds(updateDoc(doc(db, 'support_tickets', 't1'),
+      { lastMessageAt: 123, lastMessageBy: DEV, lastMessageSide: 'PTUD' }));
+  });
+
+  it('KHÔNG ghi tên người khác lên dấu vết', async () => {
+    const db = env.authenticatedContext(GV).firestore();
+    await assertFails(updateDoc(doc(db, 'support_tickets', 't1'), dauVet(DEV)));
+  });
+
+  it('KHÔNG lợi dụng đường này để đổi trạng thái phiếu', async () => {
+    // Vế quan trọng nhất. Thiếu hasOnly, đây thành cửa sau để phía trường tự
+    // duyệt phiếu của mình.
+    const db = env.authenticatedContext(GV).firestore();
+    await assertFails(updateDoc(doc(db, 'support_tickets', 't1'),
+      { ...dauVet(GV), status: 'ACCEPTED' }));
+  });
+
+  it('KHÔNG lợi dụng để đổi hạn hay độ ưu tiên', async () => {
+    const db = env.authenticatedContext(GV).firestore();
+    await assertFails(updateDoc(doc(db, 'support_tickets', 't1'),
+      { ...dauVet(GV), priority: 'P1', dueAt: 1 }));
+  });
+
+  it('trường KHÁC không đánh dấu được lên phiếu không phải của mình', async () => {
+    const db = env.authenticatedContext(GV_KHAC).firestore();
+    await assertFails(updateDoc(doc(db, 'support_tickets', 't1'), dauVet(GV_KHAC)));
+  });
+});

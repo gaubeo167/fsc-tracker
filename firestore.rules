@@ -500,7 +500,34 @@ service cloud.firestore {
 
       // Triage, đổi trạng thái, gán người xử lý: chỉ phía PTUD.
       allow update: if isAdmin() || isPtudStaff() || isMeTooUpdate()
-                    || isCampusContentEdit() || isCampusVerdict();
+                    || isCampusContentEdit() || isCampusVerdict()
+                    || isMessageMarkerUpdate();
+
+      /**
+       * Đánh dấu "vừa có trao đổi" lên phiếu.
+       *
+       * Ba field này là bản sao của tin nhắn mới nhất, để danh sách phiếu hiện
+       * được dấu hiệu có trao đổi — Firestore không join nên danh sách không
+       * đọc subcollection messages được.
+       *
+       * Mở cho CẢ cán bộ trường, vì họ cũng gửi tin. Nhưng khoá chặt ba mặt:
+       *   - chỉ đúng ba key đó được đổi, không kèm theo gì khác. Thiếu vế này
+       *     thì đây thành đường vòng để trường tự đổi trạng thái hay hạn xử lý.
+       *   - lastMessageBy phải là chính mình: không ai ghi tên người khác lên
+       *     dấu vết trao đổi.
+       *   - chỉ phiếu mình đọc được, đúng bằng phạm vi đọc phiếu.
+       */
+      function isMessageMarkerUpdate() {
+        let d = request.resource.data;
+        let old = resource.data;
+        return isApproved()
+          && (old.campusId == myCampusId()
+              || (old.get('scope', 'CAMPUS_LOCAL') == 'SYSTEM_WIDE'
+                  && myCampusId() in old.get('affectedCampusIds', [])))
+          && d.diff(old).affectedKeys()
+               .hasOnly(['lastMessageAt', 'lastMessageBy', 'lastMessageSide'])
+          && d.lastMessageBy == request.auth.uid;
+      }
 
       /**
        * Trường nghiệm thu phiếu đã được báo xử lý xong.

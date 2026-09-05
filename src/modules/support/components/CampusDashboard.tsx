@@ -8,7 +8,7 @@ import { vi } from '../i18n/vi';
 import type { RepoError } from '../repository/campusRepository';
 import { canCampusEdit, deleteTicket } from '../repository/ticketRepository';
 import { DomainError, type Ticket, type TicketType } from '../types';
-import {
+import { MessageChip,
   DONE_STATUSES, ICON, ModuleCell, OPEN_STATUSES, StatusBadge, TypeBadge, TypeFilterChips,
   fmtDateFull, fmtTime,
 } from '../ui/tokens';
@@ -527,7 +527,11 @@ export function CampusDashboard({
                         )}
                       </td>
                       <td className="px-3 py-3 align-top"><ModuleCell code={t.moduleId} /></td>
-                      <td className="px-3 py-3 align-top"><StatusBadge status={t.status} /></td>
+                      <td className="px-3 py-3 align-top">
+                        <StatusBadge status={t.status} />
+                      <MessageChip ticket={t} viewerSide="CAMPUS" />
+                        <MessageChip ticket={t} viewerSide="CAMPUS" className="mt-1" />
+                      </td>
                       <td className="px-3 py-3 align-top">
                         <DueBlock dueAt={t.dueAt} isOpen={OPEN_STATUSES.includes(t.status)} estimateDays={t.estimateDays} />
                       </td>

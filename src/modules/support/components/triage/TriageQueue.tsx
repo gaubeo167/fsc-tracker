@@ -11,7 +11,7 @@ import {
   fetchMyTriageScope, fetchPtudStaff, fetchSupportModules, type ModuleScope,
 } from '../../repository/userAdminRepository';
 import { useWorkingCalendar } from '../../hooks/useWorkingCalendar';
-import { StatusBadge, TypeBadge, TypeFilterChips } from '../../ui/tokens';
+import { MessageChip, StatusBadge, TypeBadge, TypeFilterChips } from '../../ui/tokens';
 import { useSupportModules } from '../../hooks/useSupportModules';
 import { useCampuses } from '../../hooks/useCampuses';
 import { TicketDetail } from '../TicketDetail';
@@ -324,6 +324,7 @@ export function TriageQueue({
                           {t.ticketNo}
                         </span>
                         <StatusBadge status={t.status} />
+                        <MessageChip ticket={t} viewerSide="PTUD" />
                         {t.attachments?.length > 0 && (
                           <span className="text-[12px] text-slate-400">{t.attachments.length} đính kèm</span>
                         )}

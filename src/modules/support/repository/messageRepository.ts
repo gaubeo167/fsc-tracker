@@ -115,12 +115,30 @@ export async function fetchMessageIdentity(uid: string): Promise<{
  * trao đổi kỹ thuật, và mỗi tin nhắn nhân lên hàng chục thông báo là cách nhanh
  * nhất để cái chuông trở thành thứ không ai bấm nữa.
  */
-export function nguoiCanBaoTin(ticket: Ticket, authorUid: string, side: 'CAMPUS' | 'PTUD'): string[] {
-  const raw =
+export function nguoiCanBaoTin(
+  ticket: Ticket,
+  authorUid: string,
+  side: 'CAMPUS' | 'PTUD',
+  /**
+   * Ai đã từng nói trong luồng này.
+   *
+   * Đây là vế quan trọng nhất và là chỗ bản đầu thiếu. Vai trò trên phiếu
+   * (người xử lý, người tiếp nhận) không phủ được người đang thực sự trò
+   * chuyện: admin vào hỏi một câu thì admin không nằm trong bất kỳ vai trò nào
+   * của phiếu, nên câu trả lời của trường không bao giờ tới tai họ. Ai đã mở
+   * miệng trong luồng thì đương nhiên cần biết câu trả lời.
+   */
+  participants: string[] = []
+): string[] {
+  const theoVaiTro =
     side === 'CAMPUS'
       ? [ticket.assigneeUserId, ticket.triagedBy, ticket.needsInfoBy]
       : [ticket.reporterUserId, ticket.campusContactUserId];
-  return [...new Set(raw.filter((u): u is string => !!u && u !== authorUid))];
+  return [
+    ...new Set(
+      [...theoVaiTro, ...participants].filter((u): u is string => !!u && u !== authorUid)
+    ),
+  ];
 }
 
 /**
@@ -166,6 +184,8 @@ export async function postTicketMessage(input: {
   body: string;
   attachments?: TicketAttachment[];
   author: { uid: string; name: string; side: 'CAMPUS' | 'PTUD' };
+  /** uid của những người đã nói trong luồng — họ cũng cần được báo. */
+  participants?: string[];
   /** Tin ghi việc do thao tác nghiệp vụ sinh ra (hỏi thêm thông tin…). */
   isSystem?: boolean;
 }): Promise<{ ok: boolean; error: RepoError | null }> {
@@ -203,7 +223,20 @@ export async function postTicketMessage(input: {
       ? `${input.author.name} nhắn về ${input.ticket.ticketNo}: ${body.slice(0, 140)}`
       : `${input.author.name} gửi ${attachments.length} tệp đính kèm cho ${input.ticket.ticketNo}`;
 
-    let targets = nguoiCanBaoTin(input.ticket, input.author.uid, input.author.side);
+    // Dấu vết trao đổi, chép lên chính phiếu. Đây là thứ duy nhất làm cuộc trao
+    // đổi NHÌN THẤY ĐƯỢC từ các màn danh sách — Firestore không join nên danh
+    // sách phiếu không đọc được subcollection messages. Nằm chung batch với tin
+    // nhắn: tách ra là có ngày phiếu nói "chưa có trao đổi" trong khi tin đã nằm
+    // trong đó.
+    batch.update(doc(db, TICKET_COL.tickets, input.ticket.id), {
+      lastMessageAt: now,
+      lastMessageBy: input.author.uid,
+      lastMessageSide: input.author.side,
+    });
+
+    let targets = nguoiCanBaoTin(
+      input.ticket, input.author.uid, input.author.side, input.participants ?? []
+    );
     // Phiếu chưa ai tiếp nhận: chưa có người xử lý để báo, rơi về đầu mối phân hệ.
     if (targets.length === 0 && input.author.side === 'CAMPUS') {
       targets = await dauMoiPhanHe(input.ticket.moduleId, input.author.uid);

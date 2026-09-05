@@ -60,4 +60,23 @@ describe('nguoiCanBaoTin', () => {
     const t = phieu({ campusContactUserId: 'gv' });
     expect(nguoiCanBaoTin(t, 'dev1', 'PTUD')).toEqual(['gv']);
   });
+
+  it('người đã nói trong luồng cũng được báo, dù không giữ vai trò nào trên phiếu', () => {
+    // Đây là con bug người dùng báo: admin vào hỏi một câu, trường trả lời, và
+    // admin không bao giờ được báo — vì admin không phải người xử lý, không
+    // phải người tiếp nhận, không phải ai cả trên phiếu.
+    const t = phieu();
+    expect(nguoiCanBaoTin(t, 'gv', 'CAMPUS', ['admin', 'gv'])).toEqual(['admin']);
+  });
+
+  it('gộp cả vai trò lẫn người trong luồng, không trùng lặp', () => {
+    const t = phieu({ assigneeUserId: 'dev1' });
+    expect(nguoiCanBaoTin(t, 'gv', 'CAMPUS', ['dev1', 'admin']).sort())
+      .toEqual(['admin', 'dev1']);
+  });
+
+  it('người trong luồng là chính mình thì vẫn không tự báo', () => {
+    const t = phieu();
+    expect(nguoiCanBaoTin(t, 'admin', 'PTUD', ['admin'])).toEqual(['gv']);
+  });
 });
