@@ -1,0 +1,22 @@
+[
+  {
+    "origin": ["*"],
+    "method": ["GET", "HEAD", "POST", "PUT", "DELETE"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "Content-Range",
+      "Content-Disposition",
+      "Authorization",
+      "Range",
+      "X-Firebase-Storage-Version",
+      "X-Firebase-GMPID",
+      "X-Firebase-AppCheck",
+      "X-Goog-Upload-Command",
+      "X-Goog-Upload-Header-Content-Length",
+      "X-Goog-Upload-Header-Content-Type",
+      "X-Goog-Upload-Protocol"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
