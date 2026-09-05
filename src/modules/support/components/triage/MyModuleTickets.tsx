@@ -10,6 +10,7 @@ import type { RepoError } from '../../repository/campusRepository';
 import { fetchAllTickets } from '../../repository/ticketRepository';
 import { fetchMyTriageScope } from '../../repository/userAdminRepository';
 import { TicketDetail } from '../TicketDetail';
+import { TriageActionsFor } from './TriageActionsFor';
 import type { Ticket, TicketType } from '../../types';
 import { useSupportModules } from '../../hooks/useSupportModules';
 import { useOpenTicketEvent } from '../../hooks/useOpenTicketEvent';
@@ -99,6 +100,17 @@ export function MyModuleTickets({
         onChanged={() => { setOpen(null); void load(); }}
         onBack={() => { setOpen(null); void load(); }}
         onToast={onToast}
+        // Danh sách này có cả bộ lọc "Chờ tiếp nhận", nên mở một phiếu như thế
+        // ra mà không có nút nào để tiếp nhận hay từ chối là ngõ cụt.
+        triageActions={(
+          <TriageActionsFor
+            ticket={open}
+            actorUid={actorUid}
+            isAdmin={false}
+            onDone={() => { setOpen(null); void load(); }}
+            onToast={onToast}
+          />
+        )}
       />
     );
   }

@@ -9,6 +9,7 @@ import { vi } from '../../i18n/vi';
 import { watchCampuses, type RepoError } from '../../repository/campusRepository';
 import { fetchAllTickets } from '../../repository/ticketRepository';
 import { TicketDetail } from '../TicketDetail';
+import { TriageActionsFor } from '../triage/TriageActionsFor';
 import type { Campus, Ticket, TicketStatus, TicketType } from '../../types';
 import { useSupportModules } from '../../hooks/useSupportModules';
 import { useOpenTicketEvent } from '../../hooks/useOpenTicketEvent';
@@ -104,6 +105,18 @@ export function AllTicketsView({
         onChanged={() => { setOpen(null); setRefreshKey((k) => k + 1); }}
         onBack={() => setOpen(null)}
         onToast={onToast}
+        // Phiếu chưa ai tiếp nhận thì mở từ đây cũng phải tiếp nhận / hỏi thêm /
+        // từ chối được. Thiếu dòng này, người đọc xong cuộc trao đổi phải sang
+        // tab khác tìm lại đúng phiếu đó mới thao tác được.
+        triageActions={(
+          <TriageActionsFor
+            ticket={open}
+            actorUid={actorUid}
+            isAdmin
+            onDone={() => { setOpen(null); setRefreshKey((k) => k + 1); }}
+            onToast={onToast}
+          />
+        )}
       />
     );
   }
