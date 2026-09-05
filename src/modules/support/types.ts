@@ -157,7 +157,52 @@ export const TICKET_COL = {
   /** Bản gương mỏng chỉ chứa trường phục vụ quét trùng. Xem ghi chú bên dưới. */
   ticketIndex: 'support_ticket_index',
   counters: 'support_counters',
+  /** Subcollection dưới mỗi phiếu: support_tickets/{id}/messages. */
+  messages: 'messages',
 } as const;
+
+/**
+ * Một lượt trao đổi trên phiếu, giữa cán bộ trường và người xử lý.
+ *
+ * Vì sao là SUBCOLLECTION chứ không phải một mảng trên document phiếu:
+ *   - Document Firestore trần 1 MiB. Một cuộc trao đổi dài kèm metadata ảnh sẽ
+ *     ăn dần vào chính cái phiếu, và ngày nó vỡ thì vỡ cả phiếu chứ không riêng
+ *     đoạn chat.
+ *   - Mọi lượt ghi vào mảng đều phải ghi lại CẢ document phiếu, nên hai người
+ *     nhắn cùng lúc là một người mất tin nhắn.
+ *   - Rules khoá được từng tin nhắn: sửa và xoá đều cấm, kể cả với người viết.
+ *
+ * Vì sao KHÔNG sửa, KHÔNG xoá: đây là hồ sơ xử lý sự cố. Sửa được lời mình đã
+ * nói sau khi người khác đã hành động theo lời đó thì cuộc trao đổi không còn
+ * là bằng chứng của bất cứ điều gì.
+ */
+export interface TicketMessage {
+  id: string;
+  authorUid: string;
+  /**
+   * Tên người viết, chép lại lúc gửi.
+   *
+   * Cố ý sao chép thay vì tra bảng users lúc hiển thị: một cuộc trao đổi 20 tin
+   * là 20 lượt đọc thêm mỗi lần mở phiếu, và tên người đã rời trường vẫn phải
+   * hiện đúng như lúc họ nói câu đó.
+   */
+  authorName: string;
+  /** 'CAMPUS' = phía trường, 'PTUD' = phía kỹ thuật. Quyết định căn trái/phải và màu. */
+  authorSide: 'CAMPUS' | 'PTUD';
+  body: string;
+  /** Ảnh/tài liệu gửi kèm trong lượt trao đổi này. Cùng kiểu với đính kèm của phiếu. */
+  attachments: TicketAttachment[];
+  /**
+   * Tin do hệ thống ghi hộ khi có thao tác nghiệp vụ (hỏi thêm thông tin, từ
+   * chối, nghiệm thu). Hiện khác tin người gõ để không ai tưởng máy đang nói
+   * chuyện như người.
+   */
+  isSystem: boolean;
+  createdAt: number;
+}
+
+/** Trần độ dài một tin nhắn. Đủ dài để mô tả một lỗi, đủ ngắn để không thành tài liệu. */
+export const MESSAGE_MAX_LENGTH = 2000;
 
 /** Trạng thái theo máy trạng thái §5. */
 export type TicketStatus =

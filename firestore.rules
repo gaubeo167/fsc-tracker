@@ -636,6 +636,88 @@ service cloud.firestore {
           && d.get('watcherUids', []).hasAll(oldWatchers)
           && d.get('watcherUids', []).hasOnly(oldWatchers.concat([request.auth.uid]));
       }
+
+      // ------------------------------------------------------------------
+      // Trao đổi trên phiếu: support_tickets/{ticketId}/messages/{messageId}
+      //
+      // Quyền đọc bám ĐÚNG quyền đọc phiếu cha, không tự định nghĩa lại. Định
+      // nghĩa lại là mở đường cho hai bộ luật trôi khỏi nhau: sửa phạm vi đọc
+      // phiếu mà quên chỗ này thì nội dung trao đổi rò ra rộng hơn chính cái
+      // phiếu chứa nó, và không ai nhận ra vì phiếu vẫn khoá đúng.
+      //
+      // Cuộc trao đổi thường chứa nhiều thông tin cá nhân hơn cả phiếu: đây là
+      // chỗ người ta dán tên học sinh, mã lớp, số điện thoại phụ huynh khi kỹ
+      // thuật viên hỏi "trường hợp cụ thể nào" (§12, Nghị định 13/2023).
+      // ------------------------------------------------------------------
+      match /messages/{messageId} {
+
+        /** Phiếu cha. MỘT lượt get, dùng lại cho cả đọc lẫn ghi. */
+        function phieu() {
+          return get(/databases/$(database)/documents/support_tickets/$(ticketId)).data;
+        }
+
+        /**
+         * Đọc được phiếu cha thì đọc được trao đổi của nó, không hơn.
+         *
+         * Chép đúng logic `allow read` của phiếu ở trên. Có một test khoá hai
+         * chỗ này lại với nhau ở rules.messages.test.ts, vì chép tay thì sớm
+         * muộn cũng lệch.
+         */
+        function docDuocPhieu() {
+          let t = phieu();
+          return isAdmin() || isPtudStaff() || (
+            isApproved() && (
+              t.campusId == myCampusId() ||
+              (t.get('scope', 'CAMPUS_LOCAL') == 'SYSTEM_WIDE' &&
+               myCampusId() in t.get('affectedCampusIds', []))
+            )
+          );
+        }
+
+        allow read: if docDuocPhieu();
+
+        // Gửi tin: phải đọc được phiếu, và phải tự đứng tên mình.
+        //
+        // authorUid bị ghim vào uid của chính người gọi. Không ghim thì bất kỳ
+        // ai gửi được tin cũng mạo danh được người khác trên chính hồ sơ xử lý
+        // sự cố — thứ mà sau này có người sẽ đọc để kết luận ai đã nói gì.
+        //
+        // authorSide và authorName KHÔNG ghim được ở tầng rules (rules không
+        // đọc nổi tên hiển thị của người dùng mà không tốn thêm lượt get), nên
+        // chúng là dữ liệu hiển thị, không phải dữ liệu để phân quyền. Mọi
+        // quyết định phân quyền chỉ được dựa vào authorUid.
+        allow create: if docDuocPhieu()
+                      && request.resource.data.authorUid == request.auth.uid
+                      && request.resource.data.body is string
+                      && request.resource.data.body.size() <= 2000
+                      // Tin rỗng KHÔNG kèm gì là rác. Tin rỗng có kèm ảnh thì
+                      // hợp lệ: gửi ảnh chụp màn hình không kèm lời nào là
+                      // chuyện bình thường.
+                      && (request.resource.data.body.size() > 0
+                          || request.resource.data.get('attachments', []).size() > 0)
+                      && request.resource.data.get('attachments', []).size() <= 10
+                      // Cờ isSystem chỉ đổi CÁCH HIỂN THỊ (dòng ghi việc thay vì
+                      // bong bóng chat), dùng cho các thao tác nghiệp vụ như hỏi
+                      // thêm thông tin. Nó không cấp thêm quyền gì.
+                      //
+                      // Chỉ phía PTUD đặt được, vì chỉ họ mới bấm được những nút
+                      // sinh ra loại tin đó. Cán bộ trường đặt cờ này là đang giả
+                      // giọng hệ thống trên chính hồ sơ xử lý sự cố.
+                      //
+                      // Dù cờ có thế nào, giao diện vẫn hiện authorName, và mọi
+                      // phán xét "ai đã nói câu này" chỉ dựa vào authorUid.
+                      && (request.resource.data.get('isSystem', false) == false
+                          || isAdmin() || isPtudStaff());
+
+        // Lịch sử trao đổi là bằng chứng: không sửa, không xoá, kể cả người viết
+        // và kể cả admin. Sửa được lời mình đã nói sau khi người khác đã hành
+        // động theo lời đó thì cuộc trao đổi không còn chứng minh được gì.
+        //
+        // Tin do hệ thống ghi (isSystem=true) đi bằng đường Admin SDK hoặc nằm
+        // trong cùng batch với thao tác nghiệp vụ ở server; ở tầng client thì
+        // nhánh create bên trên đã cấm.
+        allow update, delete: if false;
+      }
     }
 
     // Bản gương mỏng phục vụ quét trùng.

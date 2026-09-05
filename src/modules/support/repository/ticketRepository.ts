@@ -38,6 +38,7 @@ import {
   type TicketType,
 } from '../types';
 import { classifyError, type RepoError } from './campusRepository';
+import { fetchMessageIdentity } from './messageRepository';
 
 // ===========================================================================
 // Truy cập dữ liệu ticket.
@@ -1413,6 +1414,11 @@ export async function requestMoreInfo(input: {
 
   const now = Date.now();
   try {
+    // Danh tính người hỏi, để câu hỏi vào luồng trao đổi đứng tên đúng người.
+    // Đọc TRƯỚC batch: một lượt đọc hỏng thì thà không đổi gì còn hơn đổi trạng
+    // thái phiếu xong mới phát hiện không ghi được câu hỏi.
+    const nguoiHoi = await fetchMessageIdentity(input.actorUid);
+
     const batch = writeBatch(db);
     batch.update(doc(db, TICKET_COL.tickets, input.ticket.id), {
       status: 'NEEDS_INFO',
@@ -1433,6 +1439,25 @@ export async function requestMoreInfo(input: {
       ticket: input.ticket,
       message: `Yêu cầu ${input.ticket.ticketNo} cần bạn bổ sung thông tin: ${request}`,
     });
+
+    // Câu hỏi đi vào luồng trao đổi, cùng batch với lệnh đổi trạng thái.
+    //
+    // Vì sao cần: needsInfoRequest là MỘT ô chữ duy nhất trên phiếu. Hỏi câu thứ
+    // hai là đè mất câu thứ nhất, và câu trả lời của trường thì không được lưu ở
+    // đâu cả. Ghi vào messages là chỗ duy nhất giữ được cả chuỗi hỏi đáp.
+    //
+    // Ghi thành tin NGƯỜI GÕ chứ không phải tin hệ thống: đây là câu chữ của
+    // một người cụ thể, và trường sẽ trả lời thẳng vào đó.
+    batch.set(doc(collection(db, TICKET_COL.tickets, input.ticket.id, TICKET_COL.messages)), {
+      authorUid: input.actorUid,
+      authorName: nguoiHoi.name,
+      authorSide: nguoiHoi.side,
+      body: request,
+      attachments: [],
+      isSystem: false,
+      createdAt: now,
+    });
+
     await batch.commit();
     return { ok: true, error: null };
   } catch (error) {
