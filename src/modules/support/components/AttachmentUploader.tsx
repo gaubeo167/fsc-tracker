@@ -134,8 +134,19 @@ export function AttachmentUploader({
         } catch (err: any) {
           setItems((prev) => prev.map((x) => x.id === item.id ? {
             ...x,
+            // Câu này phải khớp ĐÚNG điều kiện của storage.rules đang chạy, nếu
+            // không nó gửi người đọc đi sửa thứ không hỏng.
+            //
+            // Rules hiện tại chỉ đòi: đăng nhập bằng mail nội bộ đã xác thực,
+            // file dưới 10MB, đúng định dạng. Nó KHÔNG còn kiểm trạng thái duyệt
+            // hay bản gán trường — hai thứ đó từng nằm trong rules và đã bị gỡ,
+            // vì phép kiểm ấy đọc Firestore từ trong storage rules mà lượt đọc
+            // đó không chạy trên project này (xem đầu file storage.rules).
+            //
+            // Bản trước của câu này vẫn nói "chưa được gán trường", và nó đã dẫn
+            // cả một buổi đi lục tài khoản trong khi lỗi nằm ở chỗ khác hẳn.
             error: err?.code === 'storage/unauthorized'
-              ? 'Không có quyền tải lên. Tài khoản của bạn đã được gán vào trường chưa?'
+              ? 'Không có quyền tải lên. Chỉ tài khoản @fpt.edu.vn hoặc @fe.edu.vn đăng nhập bằng Google mới tải tệp lên được.'
               : `Tải lên thất bại (${err?.code ?? 'lỗi mạng'})`,
           } : x));
         }
