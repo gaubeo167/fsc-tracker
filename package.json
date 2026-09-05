@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "firebase emulators:exec --config firebase.emulator.json --only firestore \"vitest run\"",
+    "test": "firebase emulators:exec --config firebase.emulator.json --only firestore,storage \"vitest run\"",
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "emulators": "firebase emulators:start --config firebase.emulator.json --only auth,firestore,storage",
