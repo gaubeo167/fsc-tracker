@@ -51,7 +51,7 @@ service firebase.storage {
     function daDuyet() {
       return request.auth != null && firestore.get(
         /databases/(default)/documents/users/$(request.auth.uid)
-      ).data.get('status', '') == 'active';
+      ).data.status == 'active';
     }
 
     /**
@@ -85,7 +85,7 @@ service firebase.storage {
     function ghiDuocVaoTruong(campusId) {
       return firestore.get(
         /databases/(default)/documents/support_role_assignments/$(request.auth.uid)
-      ).data.get('campusId', '') == campusId;
+      ).data.campusId == campusId;
     }
 
     // Chốt chặn mặc định.
@@ -155,8 +155,8 @@ service firebase.storage {
        * Cố ý KHÔNG có video: 10MB video vô dụng, mà mở ra thì tốn băng thông.
        */
       function isAllowedType() {
-        let t = request.resource.contentType;
-        return t.matches('image/.*') || t in [
+        return request.resource.contentType.matches('image/.*')
+          || request.resource.contentType in [
           'application/pdf',
           'application/msword',
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
