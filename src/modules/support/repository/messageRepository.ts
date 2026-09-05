@@ -115,12 +115,37 @@ export async function fetchMessageIdentity(uid: string): Promise<{
  * trao đổi kỹ thuật, và mỗi tin nhắn nhân lên hàng chục thông báo là cách nhanh
  * nhất để cái chuông trở thành thứ không ai bấm nữa.
  */
-function nguoiCanBaoTin(ticket: Ticket, authorUid: string, side: 'CAMPUS' | 'PTUD'): string[] {
+export function nguoiCanBaoTin(ticket: Ticket, authorUid: string, side: 'CAMPUS' | 'PTUD'): string[] {
   const raw =
     side === 'CAMPUS'
       ? [ticket.assigneeUserId, ticket.triagedBy, ticket.needsInfoBy]
       : [ticket.reporterUserId, ticket.campusContactUserId];
   return [...new Set(raw.filter((u): u is string => !!u && u !== authorUid))];
+}
+
+/**
+ * Đầu mối của phân hệ — chỗ dựa cuối cùng khi phiếu CHƯA ai tiếp nhận.
+ *
+ * Đây là lỗ hổng của bản đầu: phiếu đang chờ tiếp nhận thì assigneeUserId,
+ * triagedBy và needsInfoBy đều rỗng, nên một câu hỏi từ phía trường không báo
+ * cho MỘT AI. Mà đó lại đúng là lúc trường hay hỏi nhất — họ vừa gửi phiếu xong
+ * và đang chờ. Tin nhắn vẫn nằm im trong phiếu cho tới khi có người tình cờ mở
+ * ra, tức là bằng không có gì.
+ *
+ * Đầu mối chính và đầu mối dự phòng là đúng nhóm người sẽ tiếp nhận phiếu đó,
+ * và họ đã được khai sẵn ở tab Phân hệ.
+ */
+async function dauMoiPhanHe(moduleId: string, tru: string): Promise<string[]> {
+  try {
+    const snap = await getDoc(doc(db, COL.modules, moduleId));
+    if (!snap.exists()) return [];
+    const d = snap.data() as { ownerUserId?: string | null; backupOwnerUserId?: string | null };
+    return [...new Set([d.ownerUserId, d.backupOwnerUserId]
+      .filter((u): u is string => !!u && u !== tru))];
+  } catch {
+    // Đọc hỏng thì thà gửi tin không kèm thông báo còn hơn chặn cả lượt gửi.
+    return [];
+  }
 }
 
 /**
@@ -177,7 +202,14 @@ export async function postTicketMessage(input: {
     const message = body
       ? `${input.author.name} nhắn về ${input.ticket.ticketNo}: ${body.slice(0, 140)}`
       : `${input.author.name} gửi ${attachments.length} tệp đính kèm cho ${input.ticket.ticketNo}`;
-    for (const uid of nguoiCanBaoTin(input.ticket, input.author.uid, input.author.side)) {
+
+    let targets = nguoiCanBaoTin(input.ticket, input.author.uid, input.author.side);
+    // Phiếu chưa ai tiếp nhận: chưa có người xử lý để báo, rơi về đầu mối phân hệ.
+    if (targets.length === 0 && input.author.side === 'CAMPUS') {
+      targets = await dauMoiPhanHe(input.ticket.moduleId, input.author.uid);
+    }
+
+    for (const uid of targets) {
       batch.set(doc(collection(db, 'notifications')), {
         targetUserId: uid,
         message,
