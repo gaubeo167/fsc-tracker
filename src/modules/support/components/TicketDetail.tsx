@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, ArrowLeft, CheckCircle2, Copy, ExternalLink, HelpCircle, Lock, Mail, Pencil, RotateCcw, Trash2, UserRound, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowLeft, CheckCircle2, Copy, ExternalLink, HelpCircle, Lock, Mail, MessagesSquare, Pencil, RotateCcw, Trash2, UserRound, XCircle } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { AttachmentGallery } from './AttachmentGallery';
 import { TicketThread } from './TicketThread';
@@ -416,6 +416,32 @@ export function TicketDetail({
             TRƯỚC khối thông tin để người đã đọc từ hàng đợi không phải cuộn
             hết trang mới thấy nút.
             Lúc chưa bấm gì nó chỉ là ba cái nút — không chiếm chỗ của nội dung. */}
+        {/* Note "đang có trao đổi", đặt NGAY DƯỚI thanh trạng thái.
+            Người mở phiếu ra nhìn thanh trạng thái để biết "việc này tới đâu
+            rồi". Nhưng một câu hỏi đang chờ trả lời KHÔNG làm trạng thái đổi —
+            và cũng không nên, vì trạng thái là máy trạng thái của quy trình,
+            SLA với phân quyền đều bám vào nó. Nên dấu hiệu phải nằm cạnh nó
+            thay vì nằm trong nó. Không có dòng này thì cuộc trao đổi chỉ lộ ra
+            khi người ta cuộn hết trang xuống cuối. */}
+        {ticket.lastMessageAt && (
+          <button
+            type="button"
+            onClick={() => document.getElementById('trao-doi')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="mt-4 flex w-full items-center gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-left text-[14px] leading-[1.43] tracking-[-0.016em] text-amber-900 hover:bg-amber-100"
+          >
+            <MessagesSquare size={ICON.md} className="shrink-0 text-amber-600" />
+            <span className="flex-1">
+              Yêu cầu này đang có trao đổi.{' '}
+              <span className="font-medium">
+                {ticket.lastMessageSide === 'PTUD' ? 'Kỹ thuật' : 'Nhà trường'} nhắn lần cuối lúc{' '}
+                {fmt(ticket.lastMessageAt)}
+              </span>
+              .
+            </span>
+            <span className="shrink-0 text-[13px] font-medium text-amber-700">Xem và trả lời →</span>
+          </button>
+        )}
+
         {triageActions && <div className="mt-5">{triageActions}</div>}
 
         <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">

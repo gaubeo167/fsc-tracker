@@ -8,8 +8,9 @@ import { vi } from '../i18n/vi';
 import type { RepoError } from '../repository/campusRepository';
 import { canCampusEdit, deleteTicket } from '../repository/ticketRepository';
 import { DomainError, type Ticket, type TicketType } from '../types';
-import { MessageChip,
-  DONE_STATUSES, ICON, ModuleCell, OPEN_STATUSES, StatusBadge, TypeBadge, TypeFilterChips,
+import {
+  DONE_STATUSES, ICON, MessageChip, ModuleCell, OPEN_STATUSES, StatusBadge, TypeBadge,
+  TypeFilterChips,
   fmtDateFull, fmtTime,
 } from '../ui/tokens';
 
@@ -529,7 +530,6 @@ export function CampusDashboard({
                       <td className="px-3 py-3 align-top"><ModuleCell code={t.moduleId} /></td>
                       <td className="px-3 py-3 align-top">
                         <StatusBadge status={t.status} />
-                      <MessageChip ticket={t} viewerSide="CAMPUS" />
                         <MessageChip ticket={t} viewerSide="CAMPUS" className="mt-1" />
                       </td>
                       <td className="px-3 py-3 align-top">

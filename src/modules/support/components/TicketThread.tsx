@@ -138,7 +138,7 @@ export function TicketThread({
   }
 
   return (
-    <div className="mt-6 border-t border-slate-200 pt-5">
+    <div id="trao-doi" className="mt-6 scroll-mt-4 border-t border-slate-200 pt-5">
       <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
         <MessagesSquare size={ICON.sm} /> Trao đổi {soTin > 0 && `(${soTin})`}
       </p>
