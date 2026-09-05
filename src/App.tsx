@@ -4182,15 +4182,30 @@ const TeamView = () => {
                     onToast={showToast}
                   />
                 </td>
+                {/* Bốn trạng thái, không phải ba.
+                    Nhánh cuối trước đây gộp mọi thứ không phải active/pending
+                    thành "Vô hiệu" — nên một hồ sơ THIẾU field status trông y
+                    hệt một hồ sơ đã bị từ chối. Hai thứ đó cần hai hành động
+                    ngược nhau, và chính chỗ nhập nhằng này làm ISSUE-003 vô
+                    hình: tài khoản hỏng nằm ngay trong bảng mà không ai đọc ra. */}
                 <td className="px-6 py-4">
                   <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium",
                     user.status === 'active' ? "text-emerald-600"
-                    : user.status === 'pending' ? "text-amber-600" : "text-slate-400")}>
+                    : user.status === 'pending' ? "text-amber-600"
+                    : user.status === 'disabled' ? "text-slate-400" : "text-red-600")}>
                     <span className={cn("w-1.5 h-1.5 rounded-full",
                       user.status === 'active' ? "bg-emerald-500"
-                      : user.status === 'pending' ? "bg-amber-500" : "bg-slate-300")} />
-                    {user.status === 'active' ? 'Hoạt động' : user.status === 'pending' ? 'Chờ duyệt' : 'Vô hiệu'}
+                      : user.status === 'pending' ? "bg-amber-500"
+                      : user.status === 'disabled' ? "bg-slate-300" : "bg-red-500")} />
+                    {user.status === 'active' ? 'Hoạt động'
+                      : user.status === 'pending' ? 'Chờ duyệt'
+                      : user.status === 'disabled' ? 'Vô hiệu' : 'Trạng thái hỏng'}
                   </span>
+                  {user.status !== 'active' && user.status !== 'pending' && user.status !== 'disabled' && (
+                    <p className="mt-1 max-w-52 text-[10px] leading-relaxed text-red-500">
+                      Không dùng được phần Hỗ trợ. Sửa bằng cách đặt lại Loại thành viên ở cột bên trái.
+                    </p>
+                  )}
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
@@ -5786,7 +5801,34 @@ function AuthConsumer({
                   Mọi người khác thấy màn của trường mình: danh sách phiếu, gửi
                   phiếu mới, và đích đến của deep link ?ticket=. */}
               {effectiveNav === 'support' && profile && (
-                profile.role === 'admin' ? (
+                // CỔNG DUYỆT RIÊNG của module Hỗ trợ.
+                //
+                // Vì sao không gộp vào PendingGate: PendingGate chặn CẢ ứng dụng
+                // nên nó cố ý chỉ chặn 'pending' và 'disabled'. Tài khoản cũ chưa
+                // có field status phải tiếp tục dùng được module Công việc y như
+                // trước — projects/tasks chỉ đòi isAuthenticated().
+                //
+                // Nhưng module Hỗ trợ thì ngược lại: MỌI rule của nó (isApproved)
+                // và cả storage.rules (isApprovedUser) đòi đúng status == 'active'.
+                // Hai định nghĩa đó chừa ra một kẽ hở, và một tài khoản rơi vào kẽ
+                // hở đó thấy một màn hình trông như chạy được: đọc được bản gán
+                // trường của chính mình (rules cho phép, không cần isApproved) nên
+                // vào thẳng được form gửi phiếu, ô chọn phân hệ vẫn đầy đủ vì
+                // useSupportModules tự rơi về hằng số khi đọc hỏng. Chỉ có danh
+                // sách phiếu lặng lẽ rỗng, và lượt TẢI ẢNH LÊN báo
+                // "không có quyền" — chỗ duy nhất lỗi hiện ra thành chữ.
+                //
+                // Admin đi vòng qua cổng này đúng như isAdmin() trong rules: nó
+                // không đòi status, nếu không admin tự khoá mình ra ngoài.
+                profile.role !== 'admin' && profile.status !== 'active' ? (
+                  <Card>
+                    <StateBlock
+                      kind="denied"
+                      title="Tài khoản chưa được duyệt để dùng phần Hỗ trợ"
+                      description="Bạn đăng nhập được và vẫn dùng bình thường phần Công việc, nhưng tài khoản chưa ở trạng thái đã duyệt nên không gửi và không xem được yêu cầu hỗ trợ. Nhờ quản trị viên duyệt tài khoản trong Hỗ trợ > Tài khoản, rồi tải lại trang."
+                    />
+                  </Card>
+                ) : profile.role === 'admin' ? (
                   <SupportAdminView actorUid={profile.uid} onToast={showToast} />
                 ) : supportRole.isPtudSide ? (
                   // Cán bộ PTUD: hàng đợi tiếp nhận, không phải màn gửi phiếu.

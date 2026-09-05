@@ -2,7 +2,7 @@ import { Building2, Check, Headset, Pencil, ShieldCheck, UserRound, X } from 'lu
 import React, { useState } from 'react';
 import { Badge, Button, cn } from '../../../../components/ui';
 import { ICON } from '../../ui/tokens';
-import { clearMemberScope, reassignUser } from '../../repository/userAdminRepository';
+import { clearMemberScope, reassignUser, shouldActivateOnAssign } from '../../repository/userAdminRepository';
 import { DomainError, type Campus, type SupportRole, type SupportRoleAssignment } from '../../types';
 
 // ===========================================================================
@@ -91,12 +91,16 @@ export function MemberScopeCell({
           supportRole: role,
           campusId: canDung ? campusId || null : null,
           actorUid,
-          // Gán loại cho người đang chờ duyệt = duyệt luôn. Không làm thì admin
-          // gán xong tưởng xong, còn người kia vẫn kẹt ở màn chờ.
-          alsoActivate: userStatus === 'pending',
+          // Gán loại cho người chưa được kích hoạt = duyệt luôn. Không làm thì
+          // admin gán xong tưởng xong, còn người kia vẫn kẹt.
+          //
+          // Điều kiện nằm ở shouldActivateOnAssign, KHÔNG viết thẳng
+          // `userStatus === 'pending'` tại đây — xem ghi chú ở hàm đó, kiểu viết
+          // thẳng ấy chính là ISSUE-003.
+          alsoActivate: shouldActivateOnAssign(userStatus),
         });
         onToast(
-          userStatus === 'pending'
+          shouldActivateOnAssign(userStatus)
             ? 'Đã gán loại thành viên và kích hoạt tài khoản'
             : 'Đã cập nhật loại thành viên',
           'success'

@@ -60,6 +60,30 @@ export function watchRoleAssignments(
   );
 }
 
+/**
+ * Gán loại thành viên cho tài khoản này thì có kích hoạt luôn không.
+ *
+ * Vì sao là DANH SÁCH LOẠI TRỪ ('active' và 'disabled') chứ không phải danh sách
+ * cho phép (chỉ 'pending'):
+ *
+ * Kiểu cũ `userStatus === 'pending'` bỏ sót mọi hồ sơ có status không nằm trong
+ * ba giá trị đã biết — hồ sơ cũ chưa từng có field status là trường hợp có thật.
+ * Hậu quả gặp thật (ISSUE-003): admin gán trường cho một tài khoản như vậy, bản
+ * gán ghi thành công nên ô "Loại thành viên" hiện ra huy hiệu đầy đủ và admin
+ * đóng máy tưởng đã duyệt xong. Nhưng users.status không hề đổi, mà mọi rule của
+ * module hỗ trợ lẫn storage.rules đều đòi đúng 'active'. Người đó vào được form
+ * gửi phiếu, còn tải ảnh lên thì báo "không có quyền".
+ *
+ * Tệ hơn: họ cũng KHÔNG hiện ra ở hàng đợi Duyệt tài khoản, vì hàng đợi đó truy
+ * vấn status == 'pending'. Không còn chỗ nào trong giao diện duyệt được cho họ.
+ *
+ * 'disabled' vẫn bị loại: đó là quyết định TỪ CHỐI có chủ đích của admin, gán
+ * loại thành viên không được phép âm thầm lật lại nó.
+ */
+export function shouldActivateOnAssign(userStatus: string | undefined): boolean {
+  return userStatus !== 'active' && userStatus !== 'disabled';
+}
+
 /** Đọc quyền hỗ trợ của chính mình. Trả null nếu chưa được gán. */
 export async function getMyAssignment(uid: string): Promise<SupportRoleAssignment | null> {
   const snap = await getDoc(doc(db, COL.roleAssignments, uid));
