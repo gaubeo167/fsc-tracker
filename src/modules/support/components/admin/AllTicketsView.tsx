@@ -424,7 +424,7 @@ export function AllTicketsView({
                           </span>
                         </td>
                         <td className={TABLE.cell}>
-                          <span className="line-clamp-1 text-[14px] font-medium tracking-[-0.016em] text-slate-900">
+                          <span className="line-clamp-1 text-[14px] font-medium tracking-[-0.016em] text-slate-900" title={t.title}>
                             {t.title}
                           </span>
                           {t.description && (
@@ -437,22 +437,25 @@ export function AllTicketsView({
                         <td className={TABLE.cell}><TypeBadge type={t.type} /></td>
                         {/* Cột trường là thứ admin cần nhất: nhìn ra ngay lỗi
                             nào đang lan ra nhiều trường. */}
+                        {/* Tên trường ĐỨNG TRÊN, mã đứng dưới — không xếp
+                            ngang cạnh ô mã. Xếp ngang thì trong cột 158px, ô
+                            mã ăn mất 46px và tên còn lại đúng "FPT...", tức là
+                            phân biệt được 0 trong 18 trường. Xuống dòng thì tên
+                            được trọn chiều ngang cột. */}
                         <td className={TABLE.cell}>
-                          <span className="flex items-center gap-2">
-                            <CampusAvatar code={dv?.code ?? t.campusId} />
-                            <span className="min-w-0">
-                              <span className="line-clamp-1 text-[14px] tracking-[-0.016em] text-slate-800">
-                                {tenTruong(t.campusId)}
+                          <span className="block truncate text-[14px] tracking-[-0.016em] text-slate-800" title={tenTruong(t.campusId)}>
+                            {tenTruong(t.campusId)}
+                          </span>
+                          <span className="mt-1 flex items-center gap-1.5">
+                            <CampusAvatar code={dv?.code ?? t.campusId} className="px-1.5 py-0.5" />
+                            {t.scope === 'SYSTEM_WIDE' && (
+                              <span
+                                className="truncate text-[12px] text-sky-600"
+                                title={`Sự cố toàn hệ thống, ${(t.affectedCampusIds ?? []).length} trường bị ảnh hưởng`}
+                              >
+                                +{Math.max(0, (t.affectedCampusIds ?? []).length - 1)} trường
                               </span>
-                              {t.scope === 'SYSTEM_WIDE' && (
-                                <span
-                                  className="block truncate text-[12px] text-sky-600"
-                                  title={`Sự cố toàn hệ thống, ${(t.affectedCampusIds ?? []).length} trường bị ảnh hưởng`}
-                                >
-                                  +{Math.max(0, (t.affectedCampusIds ?? []).length - 1)} trường
-                                </span>
-                              )}
-                            </span>
+                            )}
                           </span>
                         </td>
                         {/* Phân hệ có icon riêng: năm dòng chữ xám giống nhau
@@ -462,11 +465,13 @@ export function AllTicketsView({
                           <ModuleCell code={t.moduleId} />
                         </td>
                         <td className={TABLE.cell}>
-                          <span className="line-clamp-1 text-[14px] tracking-[-0.016em] text-slate-800">
+                          <span className="block truncate text-[14px] tracking-[-0.016em] text-slate-800" title={t.contactName || undefined}>
                             {t.contactName || '—'}
                           </span>
                           {t.contactEmail && (
-                            <span className="line-clamp-1 text-[12px] text-slate-500">{t.contactEmail}</span>
+                            <span className="block truncate text-[12px] text-slate-500" title={t.contactEmail}>
+                              {t.contactEmail}
+                            </span>
                           )}
                         </td>
                         <td className={cn(TABLE.cell, 'whitespace-nowrap')}>
