@@ -1,13 +1,11 @@
 import {
-  CheckCircle2, ChevronsUpDown, ClipboardList, Clock, Filter, HelpCircle,
-  Inbox, Loader2, XCircle,
+  CheckCircle2, ClipboardList, Clock, Filter, HelpCircle, Inbox, Loader2, XCircle,
 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, StateBlock, cn } from '../../../../components/ui';
 import {
-  CampusAvatar, CopyMaPhieu, DueCell, ICON, MessageChip, ModuleCell, OPEN_STATUSES, OTimKiem,
-  PhanTrang, PriorityBadge, StatusBadge, TABLE, TypeBadge, TypeFilterChips, fmtDateFull, fmtTime,
-  khopTimKiem,
+  CampusAvatar, ICON, MessageChip, ModuleCell, OTimKiem, PhanTrang, PriorityBadge,
+  StatusBadge, TABLE, TypeBadge, TypeFilterChips, khopTimKiem,
 } from '../../ui/tokens';
 import { vi } from '../../i18n/vi';
 import { watchCampuses, type RepoError } from '../../repository/campusRepository';
@@ -74,9 +72,6 @@ const NHOM: Array<{
   { id: 'needs', label: 'Cần bổ sung', statuses: ['NEEDS_INFO'], Icon: HelpCircle, mau: 'bg-slate-100 text-slate-600', thanh: 'bg-slate-400' },
 ];
 
-/** Cột nào sắp xếp được. Chỉ hai — xem ghi chú ở nút sắp xếp. */
-type KhoaSap = 'ticketNo' | 'createdAt';
-
 export function AllTicketsView({
   actorUid, onToast,
 }: {
@@ -90,7 +85,6 @@ export function AllTicketsView({
   const [moduleFilter, setModuleFilter] = useState('');
   const [loaiLoc, setLoaiLoc] = useState<'all' | TicketType>('all');
   const [tuKhoa, setTuKhoa] = useState('');
-  const [sap, setSap] = useState<{ khoa: KhoaSap; giam: boolean }>({ khoa: 'createdAt', giam: true });
   const [trang, setTrang] = useState(1);
   const [moiTrang, setMoiTrang] = useState(10);
   // Kể cả phân hệ đã tắt: phiếu cũ của nó vẫn phải lọc ra xem được.
@@ -172,16 +166,21 @@ export function AllTicketsView({
     [theoNhom, loaiLoc]
   );
 
-  const daSap = useMemo(() => {
-    const ds = [...daLoc];
-    ds.sort((a, b) => {
-      const r = sap.khoa === 'ticketNo'
-        ? a.ticketNo.localeCompare(b.ticketNo)
-        : a.createdAt - b.createdAt;
-      return sap.giam ? -r : r;
-    });
-    return ds;
-  }, [daLoc, sap]);
+  /**
+   * MỚI NHẤT LÊN ĐẦU, ghim cứng — không còn nút đổi chiều.
+   *
+   * Hai cột sắp xếp được (mã phiếu, ngày gửi) đều đã gỡ khỏi bảng, nên một nút
+   * đổi chiều không còn cột nào để bám vào. Thứ tự này khớp với mọi màn danh
+   * sách khác: phiếu của trường, hàng đợi tiếp nhận, đơn theo phân hệ.
+   *
+   * `fetchAllTickets` đã trả về theo createdAt desc, nhưng vẫn sắp lại ở đây:
+   * bộ lọc phía trên chỉ lọc chứ không đụng thứ tự, còn dựa vào thứ tự của
+   * lượt đọc là dựa vào một chi tiết có thể đổi mà không ai nhận ra.
+   */
+  const daSap = useMemo(
+    () => [...daLoc].sort((a, b) => b.createdAt - a.createdAt),
+    [daLoc]
+  );
 
   // Về trang 1 mỗi khi tập kết quả đổi. Không có dòng này thì lọc từ 128 phiếu
   // xuống 4 trong lúc đang ở trang 9 sẽ ra một bảng rỗng.
@@ -191,10 +190,6 @@ export function AllTicketsView({
     () => daSap.slice((trang - 1) * moiTrang, trang * moiTrang),
     [daSap, trang, moiTrang]
   );
-
-  function doiSap(khoa: KhoaSap) {
-    setSap((cu) => (cu.khoa === khoa ? { khoa, giam: !cu.giam } : { khoa, giam: true }));
-  }
 
   if (open) {
     return (
@@ -368,46 +363,52 @@ export function AllTicketsView({
                 thẻ, không để cả trang trượt ngang. */}
             <div className="overflow-x-auto">
               {/*
-                table-fixed + colgroup, KHÔNG để bảng tự chia cột.
+                SÁU cột, chia theo PHẦN TRĂM với table-fixed.
 
-                Với bố cục tự động, cột "Mã phiếu" đòi 277px vì mã dài nhất
-                (FSC-APP_MY_FPT_SCHOOL-2608-0001) là một chuỗi mono không ngắt
-                được, còn cột "Tiêu đề / Nội dung" co lại còn 70px — đo được
-                trên máy thật. Tức là cột quan trọng nhất của bảng bị bóp đến
-                mức chỉ hiện "Khô...", trong khi cột mã — thứ người ta chỉ liếc
-                — chiếm một phần tư chiều ngang.
+                Đã gỡ ba cột: mã phiếu, ngày gửi, hạn. Cả ba đều là thứ tra khi
+                đã biết mình cần phiếu nào — mở phiếu ra là thấy đủ. Giữ chúng
+                trong bảng thì tổng chiều rộng lên 1220px trong khung 1086px,
+                nên bảng phải cuộn ngang và cột "Trạng thái" nằm ngoài màn hình
+                ngay từ đầu; riêng cột mã còn ăn 150px cho một chuỗi mono mà mắt
+                chỉ lướt qua.
 
-                Bố cục cố định đảo lại thứ tự ưu tiên đó: mỗi cột nhận đúng
-                phần đã khai, và mã phiếu dài thì xuống dòng (break-all) thay
-                vì đẩy cả bảng.
+                Phần trăm chứ không phải pixel cố định: sáu cột này co giãn theo
+                khung, nên thu gọn thanh menu bên trái là bảng rộng ra theo, chứ
+                không để thừa một dải trắng.
+
+                min-w 1120px là con số ĐO ĐƯỢC trên máy thật, không phải ước
+                lượng. Nhãn tiếng Việt trong badge quyết định sàn của ba cột
+                (số đã gồm 28px đệm của ô):
+                  Loại       "Đề xuất tính năng"  168px
+                  Phân hệ    "App My FPT School"  173px
+                  Trạng thái "Chờ tiếp nhận"      150px
+                Cộng Trường 157, Người gửi 168 và Tiêu đề 269 là 1085.
+
+                Hẹp hơn sàn thì badge KHÔNG bị cắt gọn mà tràn ĐÈ sang cột bên
+                cạnh, chồng chữ lên nhau — đúng lỗi đo được ở hai bản trước.
+                Đừng chỉnh mấy con số này bằng mắt: mở bảng ra rồi so
+                `cell.scrollWidth` với `cell.clientWidth`, tràn là chênh nhau.
+
+                Trên màn 1280 mà menu trái đang mở, bảng cuộn ngang; thu gọn
+                menu là vừa khít. Đó là lý do hai việc này đi cùng một lượt.
               */}
-              <table className="w-full min-w-[1180px] table-fixed text-left">
+              <table className="w-full min-w-[1120px] table-fixed text-left">
                 <colgroup>
-                  <col className="w-[150px]" />
-                  <col className="w-[240px]" />
-                  <col className="w-[104px]" />
-                  <col className="w-[158px]" />
-                  <col className="w-[132px]" />
-                  <col className="w-[148px]" />
-                  <col className="w-[96px]" />
-                  <col className="w-[118px]" />
-                  <col className="w-[74px]" />
+                  <col className="w-[24%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[16%]" />
                 </colgroup>
                 <thead>
                   <tr className={TABLE.headRow}>
-                    <th className={TABLE.headCell}>
-                      <SapTheo nhan="Mã phiếu" dang={sap.khoa === 'ticketNo'} onClick={() => doiSap('ticketNo')} />
-                    </th>
                     <th className={TABLE.headCell}>Tiêu đề / Nội dung</th>
                     <th className={TABLE.headCell}>Loại</th>
                     <th className={TABLE.headCell}>Trường</th>
                     <th className={TABLE.headCell}>Phân hệ</th>
                     <th className={TABLE.headCell}>Người gửi</th>
-                    <th className={TABLE.headCell}>
-                      <SapTheo nhan="Ngày gửi" dang={sap.khoa === 'createdAt'} onClick={() => doiSap('createdAt')} />
-                    </th>
                     <th className={TABLE.headCell}>Trạng thái</th>
-                    <th className={cn(TABLE.headCell, 'text-right')}>Hạn</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -415,14 +416,6 @@ export function AllTicketsView({
                     const dv = campusById[t.campusId];
                     return (
                       <tr key={t.id} onClick={() => setOpen(t)} className={TABLE.row}>
-                        <td className={TABLE.cell}>
-                          <span className="flex items-start gap-0.5">
-                            <span className="min-w-0 break-all font-mono text-[12px] font-semibold tabular-nums text-slate-700">
-                              {t.ticketNo}
-                            </span>
-                            <CopyMaPhieu ticketNo={t.ticketNo} onCopied={(m) => onToast(m, 'success')} />
-                          </span>
-                        </td>
                         <td className={TABLE.cell}>
                           <span className="line-clamp-1 text-[14px] font-medium tracking-[-0.016em] text-slate-900" title={t.title}>
                             {t.title}
@@ -434,7 +427,10 @@ export function AllTicketsView({
                           )}
                           <MessageChip ticket={t} viewerSide="PTUD" className="mt-1" />
                         </td>
-                        <td className={TABLE.cell}><TypeBadge type={t.type} /></td>
+                        {/* overflow-hidden là lưới an toàn: thêm một trạng thái
+                            hay một loại phiếu có nhãn dài hơn thì nó bị CẮT gọn
+                            trong cột, chứ không đè chữ sang cột bên cạnh. */}
+                        <td className={cn(TABLE.cell, 'overflow-hidden')}><TypeBadge type={t.type} /></td>
                         {/* Cột trường là thứ admin cần nhất: nhìn ra ngay lỗi
                             nào đang lan ra nhiều trường. */}
                         {/* Tên trường ĐỨNG TRÊN, mã đứng dưới — không xếp
@@ -461,7 +457,7 @@ export function AllTicketsView({
                         {/* Phân hệ có icon riêng: năm dòng chữ xám giống nhau
                             thì phải đọc từng chữ, còn icon thì quét mắt là nhận
                             ra. */}
-                        <td className={TABLE.cell}>
+                        <td className={cn(TABLE.cell, 'overflow-hidden')}>
                           <ModuleCell code={t.moduleId} />
                         </td>
                         <td className={TABLE.cell}>
@@ -474,20 +470,16 @@ export function AllTicketsView({
                             </span>
                           )}
                         </td>
-                        <td className={cn(TABLE.cell, 'whitespace-nowrap')}>
-                          <span className="block text-[14px] tabular-nums tracking-[-0.016em] text-slate-700">
-                            {fmtDateFull(t.createdAt)}
-                          </span>
-                          <span className="block text-[12px] tabular-nums text-slate-400">
-                            {fmtTime(t.createdAt)}
-                          </span>
-                        </td>
-                        <td className={TABLE.cell}>
+                        <td className={cn(TABLE.cell, 'overflow-hidden')}>
                           <StatusBadge status={t.status} />
-                          {t.priority && <PriorityBadge priority={t.priority} />}
-                        </td>
-                        <td className={cn(TABLE.cell, 'text-right')}>
-                          <DueCell dueAt={t.dueAt} isOpen={OPEN_STATUSES.includes(t.status)} estimateDays={t.estimateDays} />
+                          {/* Ưu tiên XUỐNG DÒNG riêng. Để cùng dòng với trạng
+                              thái thì hai badge cộng lại cần 150px — đo được —
+                              và cột phải nở thêm 20px chỉ để chứa chữ "P4".
+                              Đây là hai sự thật khác nhau, xếp chồng đọc rõ hơn
+                              mà cột giữ nguyên bề ngang. */}
+                          {t.priority && (
+                            <span className="mt-1 block"><PriorityBadge priority={t.priority} /></span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -506,28 +498,5 @@ export function AllTicketsView({
         )}
       </Card>
     </div>
-  );
-}
-
-/**
- * Nhãn cột bấm được để đổi chiều sắp xếp.
- *
- * Chỉ hai cột sắp xếp được — mã phiếu và ngày gửi. Mọi cột còn lại (trường,
- * phân hệ, trạng thái) đã có bộ lọc riêng ngay bên trên bảng, và sắp xếp theo
- * chúng chỉ là cách chậm hơn để làm cùng một việc.
- */
-function SapTheo({ nhan, dang, onClick }: { nhan: string; dang: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-1 transition-colors hover:text-slate-800',
-        dang && 'text-slate-800'
-      )}
-    >
-      {nhan}
-      <ChevronsUpDown size={ICON.xs} className={dang ? 'text-indigo-500' : 'text-slate-300'} aria-hidden />
-    </button>
   );
 }
