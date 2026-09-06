@@ -1,5 +1,5 @@
 import {
-  CheckCircle2, ChevronRight, ChevronsUpDown, ClipboardList, Clock, Filter, HelpCircle,
+  CheckCircle2, ChevronsUpDown, ClipboardList, Clock, Filter, HelpCircle,
   Inbox, Loader2, XCircle,
 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -364,7 +364,32 @@ export function AllTicketsView({
             {/* Bảng rộng hơn màn hình trên laptop 13" — cho cuộn ngang TRONG
                 thẻ, không để cả trang trượt ngang. */}
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1040px] text-left">
+              {/*
+                table-fixed + colgroup, KHÔNG để bảng tự chia cột.
+
+                Với bố cục tự động, cột "Mã phiếu" đòi 277px vì mã dài nhất
+                (FSC-APP_MY_FPT_SCHOOL-2608-0001) là một chuỗi mono không ngắt
+                được, còn cột "Tiêu đề / Nội dung" co lại còn 70px — đo được
+                trên máy thật. Tức là cột quan trọng nhất của bảng bị bóp đến
+                mức chỉ hiện "Khô...", trong khi cột mã — thứ người ta chỉ liếc
+                — chiếm một phần tư chiều ngang.
+
+                Bố cục cố định đảo lại thứ tự ưu tiên đó: mỗi cột nhận đúng
+                phần đã khai, và mã phiếu dài thì xuống dòng (break-all) thay
+                vì đẩy cả bảng.
+              */}
+              <table className="w-full min-w-[1180px] table-fixed text-left">
+                <colgroup>
+                  <col className="w-[150px]" />
+                  <col className="w-[240px]" />
+                  <col className="w-[104px]" />
+                  <col className="w-[158px]" />
+                  <col className="w-[132px]" />
+                  <col className="w-[148px]" />
+                  <col className="w-[96px]" />
+                  <col className="w-[118px]" />
+                  <col className="w-[74px]" />
+                </colgroup>
                 <thead>
                   <tr className={TABLE.headRow}>
                     <th className={TABLE.headCell}>
@@ -380,7 +405,6 @@ export function AllTicketsView({
                     </th>
                     <th className={TABLE.headCell}>Trạng thái</th>
                     <th className={cn(TABLE.headCell, 'text-right')}>Hạn</th>
-                    <th className={cn(TABLE.headCell, 'w-10')}><span className="sr-only">Mở phiếu</span></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -388,15 +412,15 @@ export function AllTicketsView({
                     const dv = campusById[t.campusId];
                     return (
                       <tr key={t.id} onClick={() => setOpen(t)} className={TABLE.row}>
-                        <td className={cn(TABLE.cell, 'whitespace-nowrap')}>
-                          <span className="flex items-center gap-0.5">
-                            <span className="font-mono text-[12px] font-semibold tabular-nums text-slate-700">
+                        <td className={TABLE.cell}>
+                          <span className="flex items-start gap-0.5">
+                            <span className="min-w-0 break-all font-mono text-[12px] font-semibold tabular-nums text-slate-700">
                               {t.ticketNo}
                             </span>
                             <CopyMaPhieu ticketNo={t.ticketNo} onCopied={(m) => onToast(m, 'success')} />
                           </span>
                         </td>
-                        <td className={cn(TABLE.cell, 'max-w-xs')}>
+                        <td className={TABLE.cell}>
                           <span className="line-clamp-1 text-[14px] font-medium tracking-[-0.016em] text-slate-900">
                             {t.title}
                           </span>
@@ -410,7 +434,7 @@ export function AllTicketsView({
                         <td className={TABLE.cell}><TypeBadge type={t.type} /></td>
                         {/* Cột trường là thứ admin cần nhất: nhìn ra ngay lỗi
                             nào đang lan ra nhiều trường. */}
-                        <td className={cn(TABLE.cell, 'max-w-[220px]')}>
+                        <td className={TABLE.cell}>
                           <span className="flex items-center gap-2">
                             <CampusAvatar code={dv?.code ?? t.campusId} />
                             <span className="min-w-0">
@@ -418,8 +442,11 @@ export function AllTicketsView({
                                 {tenTruong(t.campusId)}
                               </span>
                               {t.scope === 'SYSTEM_WIDE' && (
-                                <span className="text-[12px] text-sky-600">
-                                  + {(t.affectedCampusIds ?? []).length - 1} trường bị ảnh hưởng
+                                <span
+                                  className="block truncate text-[12px] text-sky-600"
+                                  title={`Sự cố toàn hệ thống, ${(t.affectedCampusIds ?? []).length} trường bị ảnh hưởng`}
+                                >
+                                  +{Math.max(0, (t.affectedCampusIds ?? []).length - 1)} trường
                                 </span>
                               )}
                             </span>
@@ -428,10 +455,10 @@ export function AllTicketsView({
                         {/* Phân hệ có icon riêng: năm dòng chữ xám giống nhau
                             thì phải đọc từng chữ, còn icon thì quét mắt là nhận
                             ra. */}
-                        <td className={cn(TABLE.cell, 'whitespace-nowrap')}>
+                        <td className={TABLE.cell}>
                           <ModuleCell code={t.moduleId} />
                         </td>
-                        <td className={cn(TABLE.cell, 'max-w-[180px]')}>
+                        <td className={TABLE.cell}>
                           <span className="line-clamp-1 text-[14px] tracking-[-0.016em] text-slate-800">
                             {t.contactName || '—'}
                           </span>
@@ -453,9 +480,6 @@ export function AllTicketsView({
                         </td>
                         <td className={cn(TABLE.cell, 'text-right')}>
                           <DueCell dueAt={t.dueAt} isOpen={OPEN_STATUSES.includes(t.status)} estimateDays={t.estimateDays} />
-                        </td>
-                        <td className={cn(TABLE.cell, 'text-right')}>
-                          <ChevronRight size={ICON.md} className="inline text-slate-300" aria-hidden />
                         </td>
                       </tr>
                     );
