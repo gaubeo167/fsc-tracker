@@ -62,6 +62,8 @@ import {
   Info,
   X,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   ShieldCheck,
   Eye,
   Save,
@@ -5443,6 +5445,31 @@ function AuthConsumer({
   const { user, profile, loading, error, signIn, logout } = useAuth();
   const { showToast } = useToast();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  /**
+   * Thanh menu trái đang thu gọn thành dải icon hay không. CHỈ áp cho desktop —
+   * bản mobile là lớp phủ trượt ra, thu gọn ở đó không có nghĩa gì.
+   *
+   * Nhớ qua các phiên bằng localStorage: đây là lựa chọn về CHỖ LÀM VIỆC, không
+   * phải về dữ liệu. Ai đã thu gọn để lấy chỗ cho bảng phiếu thì mở lại ứng
+   * dụng ngày mai vẫn phải thấy nó gọn, không phải thu lại từ đầu mỗi sáng.
+   *
+   * Đọc trong hàm khởi tạo của useState (chạy đúng một lần) chứ không phải
+   * trong effect: đặt ở effect thì lần vẽ đầu luôn là menu mở rồi mới co lại,
+   * và người dùng thấy thanh menu giật một cái mỗi lần tải trang.
+   */
+  const [menuThuGon, setMenuThuGon] = useState(() => {
+    try { return localStorage.getItem('fsc:menu-thu-gon') === '1'; } catch { return false; }
+  });
+
+  const doiMenuThuGon = () => {
+    setMenuThuGon((cu) => {
+      const moi = !cu;
+      // Bọc try/catch: chế độ riêng tư của trình duyệt ném lỗi ở localStorage,
+      // và không đáng để một lỗi lưu tuỳ chọn làm chết cả thao tác bấm.
+      try { localStorage.setItem('fsc:menu-thu-gon', moi ? '1' : '0'); } catch { /* bỏ qua */ }
+      return moi;
+    });
+  };
   // Vai trò hỗ trợ nằm ở collection riêng nên phải đọc bất đồng bộ.
   // Nó quyết định thanh điều hướng hiện những mục nào.
   const supportRole = useSupportRole(profile?.uid);
@@ -5697,14 +5724,33 @@ function AuthConsumer({
         )}
       </AnimatePresence>
 
-      {/* Desktop Sidebar */}
-      <aside className="w-72 bg-white border-r border-slate-200 flex flex-col hidden lg:flex">
-        <div className="p-8">
-          <div className="flex items-center gap-3 mb-10">
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
+      {/* ------------------------------------------------------------------
+          Desktop Sidebar — thu gọn được thành một dải icon.
+
+          Vì sao cần: những màn nặng dữ liệu (bảng Tất cả phiếu, hàng đợi tiếp
+          nhận) tranh nhau từng pixel chiều ngang với thanh menu 288px này, mà
+          menu chỉ có 6 mục và người ta đã thuộc lòng sau một tuần.
+
+          Thu gọn còn 80px: icon vẫn ở nguyên vị trí cũ theo chiều dọc, nên trí
+          nhớ cơ bắp không mất. Nhãn chuyển thành `title` để rê chuột vẫn đọc
+          được, và badge co thành một chấm trên góc icon — có việc mới thì vẫn
+          nhìn ra, chỉ là không đọc được số.
+
+          KHÔNG đụng bản mobile: ở đó menu là lớp phủ trượt ra rồi đóng lại
+          ngay, không chiếm chỗ thường trực nên chẳng có gì để thu.
+          ------------------------------------------------------------------ */}
+      <aside
+        className={cn(
+          "bg-white border-r border-slate-200 flex-col hidden lg:flex shrink-0 transition-[width] duration-200 ease-out",
+          menuThuGon ? "w-20" : "w-72"
+        )}
+      >
+        <div className={cn(menuThuGon ? "px-3 py-8" : "p-8")}>
+          <div className={cn("flex items-center gap-3 mb-10", menuThuGon && "justify-center")}>
+            <div className="w-10 h-10 shrink-0 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-100">
               <Briefcase size={20} />
             </div>
-            <span className="font-bold text-xl tracking-tight">FSC Tracker</span>
+            {!menuThuGon && <span className="font-bold text-xl tracking-tight">FSC Tracker</span>}
           </div>
 
           <nav className="space-y-1">
@@ -5715,29 +5761,72 @@ function AuthConsumer({
                   setActiveNav(item.id);
                   setCurrentProjectId(null);
                 }}
+                // Nhãn chuyển vào title khi thu gọn — đó là thứ duy nhất còn
+                // nói cho người mới biết cái icon này dẫn đi đâu.
+                title={menuThuGon ? item.label : undefined}
+                aria-label={menuThuGon ? item.label : undefined}
                 className={cn(
-                  "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all",
+                  "relative w-full flex items-center rounded-xl text-sm font-medium transition-all",
+                  menuThuGon ? "justify-center px-0 py-3" : "gap-3 px-4 py-3",
                   effectiveNav === item.id && !currentProjectId ? "bg-indigo-50 text-indigo-600" : "text-slate-500 hover:bg-slate-50"
                 )}
               >
                 <item.icon size={18} />
-                <span className="flex-1 text-left">{item.label}</span>
-                <NavBadge count={badgeOf(item.id)} muted={effectiveNav === item.id} />
+                {menuThuGon ? (
+                  // Badge co thành chấm: con số không đọc nổi trong 80px, nhưng
+                  // "có hay không có việc mới" thì vẫn phải thấy.
+                  badgeOf(item.id) > 0 && (
+                    <span
+                      className="absolute right-3 top-2.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"
+                      aria-hidden
+                    />
+                  )
+                ) : (
+                  <>
+                    <span className="flex-1 text-left">{item.label}</span>
+                    <NavBadge count={badgeOf(item.id)} muted={effectiveNav === item.id} />
+                  </>
+                )}
               </button>
             ))}
           </nav>
         </div>
 
-        <div className="mt-auto p-8 border-t border-slate-100">
-          <div className="flex items-center gap-3 mb-6">
+        <div className={cn("mt-auto border-t border-slate-100", menuThuGon ? "px-3 py-6" : "p-8")}>
+          {/* Nút thu gọn nằm NGAY TRÊN khối tài khoản, không phải trôi nổi ở
+              mép phải: mép phải là đường viền giữa menu và nội dung, đặt nút
+              đè lên đó thì nó nằm chồng lên chính thứ người ta đang đọc. */}
+          <button
+            onClick={doiMenuThuGon}
+            title={menuThuGon ? 'Mở rộng menu' : 'Thu gọn menu'}
+            aria-label={menuThuGon ? 'Mở rộng menu' : 'Thu gọn menu'}
+            aria-expanded={!menuThuGon}
+            className={cn(
+              "w-full flex items-center rounded-xl py-2.5 text-sm font-medium text-slate-500 transition-all hover:bg-slate-50 hover:text-slate-700",
+              menuThuGon ? "justify-center px-0 mb-4" : "gap-3 px-4 mb-6"
+            )}
+          >
+            {menuThuGon ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            {!menuThuGon && <span className="flex-1 text-left">Thu gọn menu</span>}
+          </button>
+
+          <div className={cn("flex items-center gap-3", menuThuGon ? "justify-center mb-4" : "mb-6")}>
             <Avatar name={profile?.displayName} photoURL={profile?.photoURL} size={10} className="border-2 border-indigo-50" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-slate-900 truncate">{profile?.displayName}</p>
-              <p className="text-xs text-slate-500 truncate capitalize">{profile?.role}</p>
-            </div>
+            {!menuThuGon && (
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-900 truncate">{profile?.displayName}</p>
+                <p className="text-xs text-slate-500 truncate capitalize">{profile?.role}</p>
+              </div>
+            )}
           </div>
-          <Button variant="ghost" className="w-full justify-start text-red-500 hover:bg-red-50" onClick={logout}>
-            <LogOut size={18} /> Đăng xuất
+          <Button
+            variant="ghost"
+            title={menuThuGon ? 'Đăng xuất' : undefined}
+            aria-label={menuThuGon ? 'Đăng xuất' : undefined}
+            className={cn("w-full text-red-500 hover:bg-red-50", menuThuGon ? "justify-center px-0" : "justify-start")}
+            onClick={logout}
+          >
+            <LogOut size={18} /> {!menuThuGon && 'Đăng xuất'}
           </Button>
         </div>
       </aside>
