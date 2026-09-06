@@ -65,7 +65,13 @@ export function TriageActionsFor({
   // Chỉ phiếu CHƯA được tiếp nhận mới còn ba thao tác này. Phiếu đã nhận mà vẫn
   // hiện nút "Tiếp nhận công việc" là mời người ta sinh ra công việc thứ hai cho
   // cùng một yêu cầu.
-  if (ticket.status !== 'TRIAGE' && ticket.status !== 'NEEDS_INFO') return null;
+  //
+  // REJECTED nằm trong danh sách vì lý do NGƯỢC LẠI: ở đó TriageActions không
+  // hiện ba nút tiếp nhận mà hiện đường lùi "tiếp nhận lại". Phiếu bị từ chối
+  // nhầm chỉ tìm lại được qua các màn danh sách (bộ lọc "Bị từ chối"), nên nếu
+  // màn chi tiết mở từ đó không có nút thì người dùng đi tới ngõ cụt đúng như
+  // trước đây họ gặp với nút từ chối.
+  if (!['TRIAGE', 'NEEDS_INFO', 'REJECTED'].includes(ticket.status)) return null;
 
   const ms = byModule[ticket.moduleId];
   const cfg = modules.find((m) => m.code === ticket.moduleId);

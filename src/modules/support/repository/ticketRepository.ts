@@ -1039,6 +1039,140 @@ export async function rejectTicket(input: {
 }
 
 /**
+ * Tiếp nhận lại một phiếu đã bị từ chối.
+ *
+ * Vì sao tồn tại: từ chối là thao tác MỘT CHẠM nằm ngay trên hàng đợi, và hàng
+ * đợi là một danh sách dài những phiếu trông giống nhau. Bấm nhầm dòng là
+ * chuyện xảy ra thật — người dùng báo ngày 06/09/2026. Không có đường lùi thì
+ * cách chữa duy nhất là bảo trường gửi lại phiếu mới: mất mã phiếu, mất toàn bộ
+ * trao đổi và đính kèm, và trường phải trả giá cho lỗi thao tác của bên tiếp
+ * nhận. §5 nói REJECTED là trạng thái KẾT THÚC — vẫn đúng: đây không phải một
+ * chiều của máy trạng thái nghiệp vụ mà là thao tác SỬA LỖI THAO TÁC, chỉ phía
+ * PTUD gọi được, và nó để lại dấu vết đầy đủ (xem dòng ghi việc bên dưới).
+ *
+ * Đưa về TRIAGE chứ không về đúng trạng thái trước lúc từ chối (có thể là
+ * NEEDS_INFO): phiếu quay lại hàng đợi để người tiếp nhận QUYẾT ĐỊNH LẠI từ
+ * đầu. Cần hỏi thêm thì bấm "Hỏi thêm thông tin" lần nữa — một lượt bấm, đổi
+ * lại là không phải đẻ ra một field "trạng thái trước khi từ chối" chỉ để phục
+ * vụ đúng một tình huống, rồi phải giữ nó đúng ở mọi chiều còn lại.
+ *
+ * Ghi chú KHÔNG bắt buộc, khác hẳn lý do từ chối. Từ chối là quyết định áp lên
+ * trường nên phải giải trình; tiếp nhận lại là sửa lỗi của CHÍNH MÌNH, và bắt
+ * giải trình một thao tác sửa lỗi chỉ khiến người ta ngại bấm rồi để nguyên
+ * phiếu sai nằm đó.
+ *
+ * Transaction chứ không phải batch, cùng lý do với acceptTicket: bản phiếu trên
+ * máy người gọi có thể đã cũ. Đồng nghiệp vừa tiếp nhận lại rồi tạo công việc
+ * xong mà ta ghi đè TRIAGE lên trên thì công việc đó thành mồ côi.
+ */
+export async function restoreRejectedTicket(input: {
+  ticket: Ticket;
+  actorUid: string;
+  /** Vì sao tiếp nhận lại. Không bắt buộc — xem ghi chú ở đầu hàm. */
+  note?: string;
+}): Promise<{ ok: boolean; error: RepoError | null }> {
+  if (input.ticket.status !== 'REJECTED') {
+    throw new DomainError(
+      'TICKET_NOT_RESTORABLE',
+      'Chỉ tiếp nhận lại được phiếu đang ở trạng thái Từ chối.',
+      { status: input.ticket.status }
+    );
+  }
+  const note = (input.note ?? '').trim();
+  const now = Date.now();
+
+  // Đọc danh tính TRƯỚC transaction: mỗi lần transaction thử lại là chạy lại
+  // toàn bộ hàm callback, nên một lượt đọc đặt bên trong sẽ lặp theo.
+  const nguoi = await fetchMessageIdentity(input.actorUid);
+
+  try {
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(doc(db, TICKET_COL.tickets, input.ticket.id));
+      const trangThai = String(snap.data()?.status ?? '');
+      if (trangThai !== 'REJECTED') {
+        throw new DomainError(
+          'TICKET_NOT_RESTORABLE',
+          'Phiếu này không còn ở trạng thái Từ chối — có thể người khác vừa tiếp nhận lại. '
+          + 'Tải lại danh sách để xem trạng thái mới.',
+          { status: trangThai }
+        );
+      }
+      // Lý do từ chối đọc từ BẢN MỚI NHẤT chứ không từ bản trên máy: lượt ghi
+      // ngay dưới đây xoá nó khỏi phiếu, nên đây là cơ hội cuối để chép lại.
+      const lyDoCu = String(snap.data()?.rejectionReason ?? '');
+
+      tx.update(doc(db, TICKET_COL.tickets, input.ticket.id), {
+        status: 'TRIAGE',
+        // Xoá sạch dấu vết từ chối. Để lại lý do cũ thì màn chi tiết vẫn vẽ khối
+        // đỏ "bị từ chối" ngay cạnh trạng thái "chờ tiếp nhận", và trường đọc
+        // được cả hai câu mâu thuẫn nhau.
+        rejectionReason: '',
+        closedAt: null,
+        triagedBy: null,
+        triagedAt: null,
+        // Đồng hồ SLA chạy tiếp. Phiếu bị từ chối lúc đang TẠM DỪNG (đi ra từ
+        // NEEDS_INFO) thì cho chạy lại từ bây giờ: TRIAGE là trạng thái trường
+        // đang chờ, đồng hồ phải chạy.
+        //
+        // CỐ Ý không bù lại quãng nằm ở trạng thái từ chối. Trừ đi được thì
+        // "từ chối rồi tiếp nhận lại" trở thành nút tạm dừng SLA ai cũng bấm
+        // được, và số liệu tồn đọng mất nghĩa.
+        slaLastResumedAt: input.ticket.slaLastResumedAt ?? now,
+        updatedAt: now,
+      });
+      tx.update(doc(db, TICKET_COL.ticketIndex, input.ticket.id), { status: 'TRIAGE' });
+
+      // Dòng ghi việc trong luồng trao đổi. BẮT BUỘC, không phải trang trí:
+      // thao tác này XOÁ lý do từ chối khỏi phiếu, mà lý do đó là thứ trường đã
+      // đọc và đã nhận qua thông báo. Không ghi lại thì hồ sơ phiếu thủng một
+      // lỗ — trường nhớ mình bị từ chối, phiếu thì nói chưa từng có chuyện đó.
+      //
+      // CỐ Ý không đụng lastMessageAt/By/Side: ba field đó nghĩa là "có người
+      // đang chờ được trả lời". Dòng ghi việc không phải câu hỏi, đánh dấu vào
+      // đó là bắn cho cả hai phía một tín hiệu "vừa nhắn" giả.
+      tx.set(doc(collection(db, TICKET_COL.tickets, input.ticket.id, TICKET_COL.messages)), {
+        authorUid: input.actorUid,
+        authorName: nguoi.name,
+        authorSide: nguoi.side,
+        body: [
+          'Đã tiếp nhận lại phiếu. Phiếu quay về hàng đợi chờ tiếp nhận.',
+          lyDoCu && `Lý do từ chối trước đó (nay đã gỡ): ${lyDoCu}`,
+          note && `Ghi chú: ${note}`,
+        ].filter(Boolean).join('\n'),
+        attachments: [],
+        isSystem: true,
+        createdAt: now,
+      });
+
+      // Báo cho trường. Họ đã nhận một thông báo "phiếu bị từ chối" kèm lý do;
+      // im lặng lúc gỡ nó ra nghĩa là để họ tin vào một điều không còn đúng.
+      for (const uid of new Set(
+        [input.ticket.reporterUserId, input.ticket.campusContactUserId ?? ''].filter(Boolean)
+      )) {
+        tx.set(doc(collection(db, 'notifications')), {
+          targetUserId: uid,
+          message:
+            `Yêu cầu ${input.ticket.ticketNo} đã được TIẾP NHẬN LẠI. `
+            + 'Lý do từ chối trước đó không còn hiệu lực, phiếu đang chờ xử lý.'
+            + (note ? ` Ghi chú: ${note}` : ''),
+          ticketId: input.ticket.id,
+          ticketNo: input.ticket.ticketNo,
+          read: false,
+          time: Timestamp.now(),
+        });
+      }
+
+      return { ok: true, error: null };
+    });
+  } catch (error) {
+    // DomainError phải đi tiếp nguyên vẹn: nó mang câu tiếng Việt viết sẵn cho
+    // người dùng. Nuốt vào classifyError là biến nó thành mã lỗi vô nghĩa.
+    if (error instanceof DomainError) throw error;
+    return { ok: false, error: classifyError(error) };
+  }
+}
+
+/**
  * Yêu cầu trường bổ sung thông tin.
  *
  * KHÔNG phải từ chối: phiếu vẫn sống, và §7 quy định đồng hồ SLA TẠM DỪNG ở

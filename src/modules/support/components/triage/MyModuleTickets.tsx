@@ -26,10 +26,16 @@ import { useCampuses } from '../../hooks/useCampuses';
 
 
 
+/**
+ * "Bị từ chối" đứng riêng, không gộp vào "Đã xong": phiếu bị từ chối không phải
+ * việc đã làm xong mà là việc đã bị chặn lại. Đây cũng là đường tìm lại một
+ * phiếu bị từ chối nhầm — mở ra là tiếp nhận lại được ngay trong màn chi tiết.
+ */
 const FILTERS = [
   { id: 'open', label: 'Đang mở', match: (t: Ticket) => OPEN.includes(t.status) },
   { id: 'triage', label: 'Chờ tiếp nhận', match: (t: Ticket) => t.status === 'TRIAGE' },
   { id: 'done', label: 'Đã xong', match: (t: Ticket) => DONE.includes(t.status) },
+  { id: 'rejected', label: 'Bị từ chối', match: (t: Ticket) => t.status === 'REJECTED' },
   { id: 'all', label: 'Tất cả', match: () => true },
 ] as const;
 
