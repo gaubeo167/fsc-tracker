@@ -26,3 +26,8 @@ storage-debug.log
 *-debug.log
 emulator-data/
 .vercel
+
+# Sản phẩm phụ của QA chạy trên máy: báo cáo + ảnh chụp màn hình.
+# Nằm ngoài repo vì mỗi lượt QA đẻ ra vài chục ảnh PNG, và chúng chỉ nói về
+# một lần chạy trên một máy chứ không phải về mã nguồn.
+.gstack/
