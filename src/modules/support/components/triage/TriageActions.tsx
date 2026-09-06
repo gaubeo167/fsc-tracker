@@ -683,12 +683,11 @@ export function TriageActions({
             <XCircle size={ICON.md} className="text-red-500" />
             Phiếu này đang bị từ chối
           </p>
-          {t.rejectionReason && (
-            <p className="mt-1.5 whitespace-pre-wrap rounded-md bg-white px-3 py-2 text-[14px] leading-[1.43] tracking-[-0.016em] text-slate-600">
-              {t.rejectionReason}
-            </p>
-          )}
-          <p className="mt-2.5 text-[14px] leading-[1.43] tracking-[-0.016em] text-slate-600">
+          {/* CỐ Ý không in lại lý do từ chối ở đây. Khung này chỉ hiện trong
+              màn chi tiết (phiếu REJECTED không nằm trong hàng đợi), mà màn đó
+              đã vẽ nguyên văn lý do trong khối đỏ ngay phía trên — in lần nữa
+              là hai lần cùng một câu cách nhau 60px, đọc ra như lỗi hiển thị. */}
+          <p className="mt-2 text-[14px] leading-[1.43] tracking-[-0.016em] text-slate-600">
             Từ chối nhầm phiếu? Tiếp nhận lại thì phiếu quay về hàng đợi chờ tiếp nhận,
             giữ nguyên mã phiếu, đính kèm và toàn bộ trao đổi. Trường được báo là lý do
             từ chối không còn hiệu lực.
