@@ -269,19 +269,22 @@ export function AllTicketsView({
                     dang ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-200 hover:border-slate-300'
                   )}
                 >
+                  {/* Nhãn nằm DƯỚI, chiếm trọn chiều ngang thẻ — không đứng
+                      cạnh icon. Bảy thẻ trên khung 1088px là mỗi thẻ ~140px;
+                      trừ icon 36px và khoảng cách thì nhãn chỉ còn ~90px, và
+                      "Chờ tiếp nhận" hiện ra thành "Chờ tiếp nh...". Nhãn LÀ
+                      thứ nói ô này đếm cái gì, cắt nó đi thì con số mất nghĩa. */}
                   <div className="flex items-center gap-2.5">
                     <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full', n.mau)}>
                       <n.Icon size={ICON.lg} aria-hidden />
                     </span>
-                    <div className="min-w-0">
-                      <p className="text-[20px] font-semibold leading-[1.1] tabular-nums tracking-[-0.022em] text-slate-900">
-                        {so}
-                      </p>
-                      <p className="truncate text-[12px] leading-[1.3] tracking-[-0.01em] text-slate-500">
-                        {n.label}
-                      </p>
-                    </div>
+                    <p className="text-[20px] font-semibold leading-[1.1] tabular-nums tracking-[-0.022em] text-slate-900">
+                      {so}
+                    </p>
                   </div>
+                  <p className="mt-1.5 truncate text-[12px] leading-[1.3] tracking-[-0.01em] text-slate-500" title={n.label}>
+                    {n.label}
+                  </p>
                   {/* Thanh tỉ lệ. Ô "Tất cả" không có thanh: một thanh luôn đầy
                       100% không nói thêm điều gì. */}
                   {n.id !== 'all' && (
