@@ -1,11 +1,13 @@
 import {
   AlertTriangle, CalendarClock, Check, ChevronDown, Flag, HelpCircle,
-  MessageSquare, UserRound, Users, X,
+  MessageSquare, RotateCcw, UserRound, Users, X, XCircle,
 } from 'lucide-react';
 import React, { useState } from 'react';
 import { Button, cn } from '../../../../components/ui';
 import { ICON } from '../../ui/tokens';
-import { acceptTicket, rejectTicket, requestMoreInfo } from '../../repository/ticketRepository';
+import {
+  acceptTicket, rejectTicket, requestMoreInfo, restoreRejectedTicket,
+} from '../../repository/ticketRepository';
 import { addWorkingMs, type WorkingCalendar } from '../../services/workingTime';
 import { findPolicy } from '../../services/slaCalculator';
 import { DomainError, type Ticket, type TicketPriority } from '../../types';
@@ -34,7 +36,14 @@ import { DomainError, type Ticket, type TicketPriority } from '../../types';
 
 type Toast = (m: string, t?: 'success' | 'error' | 'info') => void;
 
-export type TriageMode = 'accept' | 'reject' | 'info' | null;
+/**
+ * Khung nào đang mở.
+ *
+ * 'restore' không phải một thao tác tiếp nhận mà là đường LÙI của 'reject' —
+ * nó chỉ tồn tại trên phiếu đã bị từ chối, và hai nhóm này không bao giờ hiện
+ * cùng lúc (xem `daTuChoi` bên dưới).
+ */
+export type TriageMode = 'accept' | 'reject' | 'info' | 'restore' | null;
 
 /** Một lớp ô nhập cho MỌI ô trong khung tiếp nhận — cao bằng nhau, viền như nhau. */
 // Bo 11px = `button-pearl-capsule` của DESIGN.md — bán kính Apple dành cho ô
@@ -63,6 +72,28 @@ function Nhan({ icon, children, bat }: { icon: React.ReactNode; children: React.
       {children}
       {bat && <span className="text-red-500" aria-hidden>*</span>}
     </span>
+  );
+}
+
+/**
+ * Mã và tiêu đề phiếu ĐANG bị thao tác, in trên đầu mỗi khung.
+ *
+ * Vì sao phải nhắc lại một thứ đã có ngay phía trên trong danh sách: hàng đợi
+ * là một cột dài những phiếu trông na ná nhau, và khung thao tác bung ra bên
+ * dưới dòng phiếu mà không mang theo dấu hiệu nào của dòng đó. Bấm nhầm dòng
+ * rồi gõ xong cả lý do vẫn không có chỗ nào để nhận ra mình đang từ chối nhầm
+ * phiếu — đây là chỗ cuối cùng còn kịp, ngay cạnh cái nút.
+ */
+function PhieuDang({ ticket, className }: { ticket: Ticket; className?: string }) {
+  return (
+    <p className={cn('flex flex-wrap items-baseline gap-x-2 gap-y-0.5', className)}>
+      <span className="rounded-xs bg-white/80 px-1.5 py-0.5 font-mono text-[12px] font-semibold tabular-nums">
+        {ticket.ticketNo}
+      </span>
+      <span className="min-w-0 text-[14px] font-semibold leading-[1.29] tracking-[-0.016em]">
+        {ticket.title}
+      </span>
+    </p>
   );
 }
 
@@ -128,7 +159,7 @@ function fromDateInput(value: string): number {
 
 export function TriageActions({
   ticket: t, actorUid, mode, onModeChange, projectId, canAssignOthers, people,
-  nameOf, calendar, onDone, onToast,
+  nameOf, calendar, onDone, onRejected, onToast, layout = 'row',
 }: {
   ticket: Ticket;
   actorUid: string;
@@ -145,7 +176,30 @@ export function TriageActions({
   calendar: WorkingCalendar;
   /** Thao tác xong — bên gọi nạp lại dữ liệu. */
   onDone: () => void | Promise<void>;
+  /**
+   * Vừa từ chối xong phiếu nào. Bên gọi dùng để dựng lối HOÀN TÁC.
+   *
+   * Phải báo ra ngoài chứ không tự dựng lối hoàn tác tại đây: sau khi từ chối,
+   * phiếu rời khỏi hàng đợi và component này bị tháo cùng dòng của nó — mọi thứ
+   * nó cầm đều biến mất đúng lúc người dùng cần tới nhất. Chỉ danh sách mới
+   * sống đủ lâu để giữ được lối lùi đó.
+   *
+   * Phiếu trả về là bản CHIẾU của phiếu sau lượt ghi vừa rồi (status REJECTED,
+   * kèm lý do), không phải bản trong tay lúc bấm nút — bên nhận cần đúng bản đó
+   * để gọi tiếp restoreRejectedTicket().
+   */
+  onRejected?: (ticket: Ticket, reason: string) => void;
   onToast: Toast;
+  /**
+   * Ba nút xếp NGANG hay xếp DỌC.
+   *
+   * 'column' dành cho cột thao tác đứng riêng bên phải thẻ phiếu ở hàng đợi:
+   * ở đó ba nút phải rộng bằng nhau và bằng cột, vì một cột nút so le đọc ra
+   * như ba mức quan trọng khác nhau. Chỉ ảnh hưởng tới BỘ NÚT — khung nhập của
+   * từng lựa chọn luôn cần cả chiều ngang, nên bên gọi chuyển nó xuống dưới
+   * thẻ khi bung ra (xem TriageQueue).
+   */
+  layout?: 'row' | 'column';
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
@@ -155,6 +209,15 @@ export function TriageActions({
   const setMode = (m: TriageMode) => { setLoi(''); onModeChange(m); };
 
   const noProject = !projectId;
+
+  /**
+   * Phiếu đã bị từ chối: chỉ còn đúng một đường — gỡ chính lượt từ chối đó ra.
+   *
+   * Đây là một BỘ NÚT KHÁC HẲN chứ không phải mode thứ tư của bộ ba tiếp nhận.
+   * Trộn chung thì có lúc trên cùng một phiếu hiện ra cả "Tiếp nhận công việc"
+   * lẫn "Tiếp nhận lại phiếu", mà hai câu đó đọc gần như nhau.
+   */
+  const daTuChoi = t.status === 'REJECTED';
 
   // Bản nháp dựng LƯỜI, ở lần đọc đầu tiên: dựng sẵn cho mọi phiếu trong hàng
   // đợi là tính hạn SLA cho hàng chục phiếu mà người dùng sẽ không mở tới.
@@ -215,11 +278,36 @@ export function TriageActions({
         m === 'reject' ? `Đã từ chối ${t.ticketNo}` : `Đã gửi yêu cầu bổ sung cho ${t.ticketNo}`,
         m === 'reject' ? 'info' : 'success'
       );
+      // Báo TRƯỚC onDone(): onDone nạp lại danh sách và tháo chính component
+      // này ra khỏi cây, nên mọi thứ chạy sau nó là chạy trên xác.
+      if (m === 'reject') onRejected?.({ ...t, status: 'REJECTED', rejectionReason: reason.trim() }, reason.trim());
       onModeChange(null);
       setReason('');
       await onDone();
     } catch (e: any) {
       setLoi(e instanceof DomainError ? e.message : 'Không lưu được');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Gỡ một lượt từ chối, đưa phiếu về hàng đợi. Ghi chú không bắt buộc. */
+  async function restore() {
+    setBusy(true);
+    try {
+      const { ok, error: err } = await restoreRejectedTicket({ ticket: t, actorUid, note: reason });
+      if (!ok) {
+        setLoi(err?.kind === 'denied'
+          ? 'Bạn không có quyền thao tác trên phiếu này.'
+          : `Không tiếp nhận lại được (${err?.message ?? 'lỗi mạng'})`);
+        return;
+      }
+      onToast(`Đã tiếp nhận lại ${t.ticketNo}. Phiếu quay về hàng đợi chờ tiếp nhận.`, 'success');
+      onModeChange(null);
+      setReason('');
+      await onDone();
+    } catch (e: any) {
+      setLoi(e instanceof DomainError ? e.message : 'Không tiếp nhận lại được');
     } finally {
       setBusy(false);
     }
@@ -271,8 +359,9 @@ export function TriageActions({
   return (
     <>
       {/* Phân hệ chưa gán dự án thì không sinh task được — nói ngay thay vì để
-          họ bấm rồi mới báo lỗi. */}
-      {noProject && (
+          họ bấm rồi mới báo lỗi. Phiếu đã từ chối thì chưa tới lượt: việc duy
+          nhất còn làm được ở đó là gỡ lượt từ chối, không đụng tới dự án. */}
+      {noProject && !daTuChoi && (
         <p className="mt-2.5 flex items-center gap-2 rounded-md bg-amber-50 px-3.5 py-2.5 text-[14px] leading-[1.43] tracking-[-0.016em] text-amber-800">
           <AlertTriangle size={ICON.sm} className="shrink-0" />
           Phân hệ này chưa được gán dự án. Vào tab Phân hệ để gán trước khi tiếp nhận.
@@ -287,13 +376,13 @@ export function TriageActions({
 
       {/* Ba lựa chọn. Không mở modal: hàng đợi nhiều dòng, mở/đóng
           modal từng cái phá mục tiêu dưới 30 giây mỗi phiếu. */}
-      {mode === null && (
-        <div className="mt-3.5 flex flex-wrap gap-2">
+      {mode === null && !daTuChoi && (
+        <div className={cn('flex gap-2', layout === 'column' ? 'flex-col' : 'mt-3.5 flex-wrap')}>
           <Button
             size="sm"
             disabled={busy || noProject}
             onClick={() => { setMode('accept'); setReason(''); }}
-            className={cn(noProject && 'opacity-50')}
+            className={cn(noProject && 'opacity-50', layout === 'column' && 'w-full')}
           >
             <Check size={ICON.md} /> Tiếp nhận công việc
           </Button>
@@ -301,10 +390,12 @@ export function TriageActions({
               thông tin chứ không phải sai, và từ chối là cửa một
               chiều nên không nên là lựa chọn dễ bấm nhất. */}
           <Button size="sm" variant="outline" disabled={busy}
+            className={cn(layout === 'column' && 'w-full')}
             onClick={() => { setMode('info'); setReason(''); }}>
             <HelpCircle size={ICON.md} /> Hỏi thêm thông tin
           </Button>
           <Button size="sm" variant="danger" disabled={busy}
+            className={cn(layout === 'column' && 'w-full')}
             onClick={() => { setMode('reject'); setReason(''); }}>
             <X size={ICON.md} /> Từ chối
           </Button>
@@ -313,7 +404,7 @@ export function TriageActions({
 
       {/* Chọn "Tiếp nhận" rồi mới phải điền: ưu tiên, người xử lý,
           hạn hoàn thành, CC. */}
-      {mode === 'accept' && (
+      {mode === 'accept' && !daTuChoi && (
         <div className="mt-3.5 rounded-xl border border-indigo-200 bg-indigo-50/40 p-5">
           {/* Chữ thường, cân 600 — bỏ `uppercase tracking-wider`
               của bản cũ. Chữ hoa giãn ly không nằm trong hệ Apple,
@@ -322,6 +413,7 @@ export function TriageActions({
             <ChevronDown size={ICON.md} />
             Thông tin tiếp nhận
           </div>
+          <PhieuDang ticket={t} className="mt-2 text-indigo-900" />
 
           <div className="mt-4 grid gap-4 lg:grid-cols-3">
             <label className="block">
@@ -506,11 +598,24 @@ export function TriageActions({
       )}
 
       {/* Từ chối và hỏi thêm dùng chung một ô lý do. */}
-      {mode !== null && mode !== 'accept' && (
+      {(mode === 'reject' || mode === 'info') && (
         <div className={cn(
           'mt-3.5 rounded-xl border p-4',
           mode === 'reject' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'
         )}>
+          {/* Đang thao tác lên phiếu NÀO. Với từ chối thì đây là hàng rào cuối
+              cùng trước một cửa một chiều — xem ghi chú ở PhieuDang. */}
+          <p className={cn(
+            'flex items-center gap-1.5 text-[14px] font-semibold tracking-[-0.016em]',
+            mode === 'reject' ? 'text-red-800' : 'text-amber-800'
+          )}>
+            {mode === 'reject' ? <XCircle size={ICON.md} /> : <HelpCircle size={ICON.md} />}
+            {mode === 'reject' ? 'Đang từ chối phiếu' : 'Đang hỏi thêm về phiếu'}
+          </p>
+          <PhieuDang
+            ticket={t}
+            className={cn('mt-1.5 mb-3', mode === 'reject' ? 'text-red-900' : 'text-amber-900')}
+          />
           <label className="block">
             <Nhan icon={mode === 'reject' ? <X size={ICON.sm} /> : <HelpCircle size={ICON.sm} />} bat>
               {mode === 'reject'
@@ -554,9 +659,84 @@ export function TriageActions({
               onClick={() => submitReason(mode as 'reject' | 'info')}
             >
               {busy ? 'Đang gửi…'
-                : mode === 'reject' ? 'Xác nhận từ chối' : 'Gửi yêu cầu bổ sung'}
+                : mode === 'reject' ? `Xác nhận từ chối ${t.ticketNo}` : 'Gửi yêu cầu bổ sung'}
             </Button>
             <Button size="sm" variant="ghost"
+              onClick={() => { setMode(null); setReason(''); }}>
+              Huỷ
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------
+          PHIẾU ĐÃ BỊ TỪ CHỐI — đường lùi.
+
+          Hiện NGAY trên phiếu chứ không giấu sau một menu "thao tác khác":
+          người vào tới đây phần lớn là vào để sửa một cú bấm nhầm, và bắt họ
+          đi tìm nút sửa lỗi là kéo dài đúng khoảng thời gian phiếu đang nằm
+          sai chỗ.
+          ------------------------------------------------------------------ */}
+      {mode === null && daTuChoi && (
+        <div className="mt-3.5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="flex items-center gap-1.5 text-[14px] font-semibold tracking-[-0.016em] text-slate-800">
+            <XCircle size={ICON.md} className="text-red-500" />
+            Phiếu này đang bị từ chối
+          </p>
+          {t.rejectionReason && (
+            <p className="mt-1.5 whitespace-pre-wrap rounded-md bg-white px-3 py-2 text-[14px] leading-[1.43] tracking-[-0.016em] text-slate-600">
+              {t.rejectionReason}
+            </p>
+          )}
+          <p className="mt-2.5 text-[14px] leading-[1.43] tracking-[-0.016em] text-slate-600">
+            Từ chối nhầm phiếu? Tiếp nhận lại thì phiếu quay về hàng đợi chờ tiếp nhận,
+            giữ nguyên mã phiếu, đính kèm và toàn bộ trao đổi. Trường được báo là lý do
+            từ chối không còn hiệu lực.
+          </p>
+          <div className="mt-3.5">
+            <Button size="sm" disabled={busy} className={cn(layout === 'column' && 'w-full')}
+              onClick={() => { setMode('restore'); setReason(''); }}>
+              <RotateCcw size={ICON.md} /> Tiếp nhận lại phiếu
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {mode === 'restore' && (
+        <div className="mt-3.5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="flex items-center gap-1.5 text-[14px] font-semibold tracking-[-0.016em] text-emerald-800">
+            <RotateCcw size={ICON.md} />
+            Đang tiếp nhận lại phiếu
+          </p>
+          <PhieuDang ticket={t} className="mt-1.5 mb-3 text-emerald-900" />
+          <label className="block">
+            {/* KHÔNG bắt buộc, cố ý. Từ chối là quyết định áp lên trường nên
+                phải giải trình; tiếp nhận lại là sửa lỗi của chính mình, và bắt
+                giải trình một thao tác sửa lỗi chỉ khiến người ta ngại bấm rồi
+                để nguyên phiếu sai nằm đó. */}
+            <Nhan icon={<MessageSquare size={ICON.sm} />}>
+              Ghi chú cho trường (không bắt buộc)
+            </Nhan>
+            <textarea
+              rows={2}
+              autoFocus
+              maxLength={GHI_CHU_TOI_DA}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Ví dụ: Từ chối nhầm phiếu, yêu cầu này vẫn được xử lý bình thường."
+              className={cn(O_NHAP, 'resize-y')}
+            />
+            <span className="mt-1.5 block text-[12px] leading-[1.35] tracking-[-0.01em] text-slate-500">
+              Lý do từ chối cũ sẽ được gỡ khỏi phiếu và ghi lại trong phần trao đổi,
+              để hồ sơ phiếu vẫn còn dấu vết chuyện đã xảy ra.
+            </span>
+          </label>
+          <div className="mt-3 flex gap-2">
+            <Button size="sm" disabled={busy} onClick={() => restore()}>
+              <RotateCcw size={ICON.md} />
+              {busy ? 'Đang tiếp nhận lại…' : `Xác nhận tiếp nhận lại ${t.ticketNo}`}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy}
               onClick={() => { setMode(null); setReason(''); }}>
               Huỷ
             </Button>

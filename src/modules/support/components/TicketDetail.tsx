@@ -339,9 +339,16 @@ export function TicketDetail({
                 <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-red-900">
                   {ticket.rejectionReason}
                 </p>
-                <p className="mt-2 text-[11px] text-red-600">
-                  Phiếu này đã đóng. Nếu vấn đề vẫn còn, hãy tạo phiếu mới kèm thông tin đã bổ sung.
-                </p>
+                {/* Câu này chỉ đúng với PHÍA TRƯỜNG. Với người tiếp nhận thì
+                    phiếu bị từ chối KHÔNG phải ngõ cụt — khe triageActions ngay
+                    bên dưới có nút tiếp nhận lại, và hai câu đứng cạnh nhau sẽ
+                    cãi nhau: "phiếu đã đóng, tạo phiếu mới đi" ngay trên một
+                    cái nút mở lại chính phiếu đó. */}
+                {canEdit && (
+                  <p className="mt-2 text-[11px] text-red-600">
+                    Phiếu này đã đóng. Nếu vấn đề vẫn còn, hãy tạo phiếu mới kèm thông tin đã bổ sung.
+                  </p>
+                )}
               </div>
             )}
 

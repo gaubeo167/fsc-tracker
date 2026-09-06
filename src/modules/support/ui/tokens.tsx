@@ -1,12 +1,14 @@
 import {
-  AlertTriangle, BookOpen, Bug, CheckCircle2, CircleDollarSign, Clock, Globe,
-  HeartPulse, HelpCircle, Lightbulb, Loader2, PauseCircle, RotateCcw,
-  MessagesSquare, Smartphone, XCircle, Copy as CopyIcon,
+  AlertTriangle, BookOpen, Bug, CheckCircle2, ChevronLeft, ChevronRight,
+  CircleDollarSign, Clock, Globe, HeartPulse, HelpCircle, Lightbulb, Loader2,
+  PauseCircle, RotateCcw, Search, MessagesSquare, Smartphone, Users, X, XCircle,
+  Copy as CopyIcon,
 } from 'lucide-react';
 import { useSupportModules } from '../hooks/useSupportModules';
 import React from 'react';
 import { Badge, cn } from '../../../components/ui';
-import type { Ticket, TicketPriority, TicketStatus, TicketType } from '../types';
+import { removeDiacritics } from '../services/textNormalize';
+import type { ImpactScale, Ticket, TicketPriority, TicketStatus, TicketType } from '../types';
 
 // ===========================================================================
 // Token giao diện của module hỗ trợ.
@@ -388,5 +390,291 @@ export function MessageChip({
         : 'Đang chờ trả lời'}
       <span className="font-normal opacity-70">· {khi}</span>
     </span>
+  );
+}
+
+// ===========================================================================
+// Mảnh dùng chung của HAI màn danh sách phiếu: hàng đợi chờ tiếp nhận và
+// bảng tất cả phiếu.
+//
+// Gom ở đây vì cùng một lý do sinh ra cả file này: hai màn đó từng tự vẽ lấy ô
+// tìm kiếm, phân trang và ô mã trường, và ba bản sao thì lệch nhau ngay lần
+// chỉnh nhịp đầu tiên.
+// ===========================================================================
+
+/**
+ * Phiếu này đã chờ bao lâu rồi.
+ *
+ * Hàng đợi xếp phiếu cũ lên trước, nhưng thứ tự không nói được KHOẢNG CÁCH: ba
+ * phiếu đầu có thể cách nhau ba phút hoặc ba tuần. Một mốc ngày giờ tuyệt đối
+ * thì bắt người đọc tự trừ. Con số này trả lời thẳng câu người trực hỏi —
+ * "trường đã chờ mình bao lâu rồi".
+ */
+export function tuoiTuongDoi(ms: number): string {
+  const phut = Math.max(0, Math.floor((Date.now() - ms) / 60_000));
+  if (phut < 1) return 'vừa xong';
+  if (phut < 60) return `${phut} phút trước`;
+  const gio = Math.floor(phut / 60);
+  if (gio < 24) return `${gio} giờ trước`;
+  const ngay = Math.floor(gio / 24);
+  return `${ngay} ngày trước`;
+}
+
+/**
+ * Mức ảnh hưởng do chính người báo khai.
+ *
+ * ĐỨNG THAY CHO độ ưu tiên ở màn hàng đợi, và đây là một khác biệt có chủ đích
+ * so với bản thiết kế: `priority` chỉ tồn tại SAU khi đầu mối tiếp nhận (xem
+ * acceptTicket). Vẽ một nhãn "Ưu tiên cao" lên phiếu chưa ai tiếp nhận là bịa
+ * ra một quyết định chưa ai đưa. Mức ảnh hưởng thì có thật từ lúc gửi, và nó
+ * đúng là thứ người trực dùng để chọn phiếu nào làm trước.
+ */
+export const TICKET_IMPACT: Record<
+  ImpactScale,
+  { label: string; full: string; className: string }
+> = {
+  GT_100: {
+    label: 'Trên 100 người',
+    full: 'Người báo khai: trên 100 người bị ảnh hưởng',
+    className: 'bg-red-50 text-red-700',
+  },
+  FROM_10_TO_100: {
+    label: '10 – 100 người',
+    full: 'Người báo khai: 10 đến 100 người bị ảnh hưởng',
+    className: 'bg-amber-50 text-amber-800',
+  },
+  LT_10: {
+    label: 'Dưới 10 người',
+    full: 'Người báo khai: dưới 10 người bị ảnh hưởng',
+    className: 'bg-slate-100 text-slate-600',
+  },
+};
+
+export function ImpactBadge({ scale }: { scale: ImpactScale }) {
+  const m = TICKET_IMPACT[scale];
+  return (
+    <span
+      title={m.full}
+      className={cn(
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5',
+        'text-[12px] font-semibold tracking-[-0.01em]',
+        m.className
+      )}
+    >
+      <Users size={ICON.xs} aria-hidden />
+      {m.label}
+    </span>
+  );
+}
+
+/**
+ * Ô vuông mang mã trường, màu suy từ chính mã đó.
+ *
+ * Không phải trang trí: một cột toàn tên trường viết đầy đủ ("Trường Tiểu học,
+ * THCS và THPT FPT Thanh Hoá") thì mọi dòng đều bắt đầu bằng cùng bốn chữ, và
+ * mắt phải đọc tới giữa câu mới phân biệt được. Ba chữ viết hoa trên một mảng
+ * màu cố định thì nhận ra ở tầm nhìn ngoại vi.
+ *
+ * Màu suy từ mã bằng một phép băm ổn định, KHÔNG lưu vào dữ liệu: một trường
+ * luôn mang đúng một màu ở mọi màn, mọi phiên, mà không cần ai đi gán màu cho
+ * 18 trường rồi bảo trì bảng đó.
+ */
+const MAU_TRUONG = [
+  'bg-violet-100 text-violet-700',
+  'bg-sky-100 text-sky-700',
+  'bg-emerald-100 text-emerald-700',
+  'bg-amber-100 text-amber-800',
+  'bg-rose-100 text-rose-700',
+  'bg-indigo-100 text-indigo-700',
+  'bg-teal-100 text-teal-700',
+];
+
+export function CampusAvatar({ code, className }: { code: string; className?: string }) {
+  let h = 0;
+  for (let i = 0; i < code.length; i += 1) h = (h * 31 + code.charCodeAt(i)) % 100_000;
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'flex shrink-0 items-center justify-center rounded-lg px-2 py-1.5 font-mono text-[12px] font-semibold tabular-nums',
+        MAU_TRUONG[h % MAU_TRUONG.length],
+        className
+      )}
+    >
+      {code.slice(0, 4)}
+    </span>
+  );
+}
+
+/** Nút chép mã phiếu. Mã là thứ người ta dán vào Zalo, mail, biên bản họp. */
+export function CopyMaPhieu({
+  ticketNo, onCopied,
+}: {
+  ticketNo: string;
+  onCopied?: (m: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={`Chép mã ${ticketNo}`}
+      aria-label={`Chép mã phiếu ${ticketNo}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard?.writeText(ticketNo);
+        onCopied?.(`Đã chép mã ${ticketNo}`);
+      }}
+      className="rounded p-1 text-slate-400 transition-colors hover:bg-white hover:text-slate-700"
+    >
+      <CopyIcon size={ICON.sm} />
+    </button>
+  );
+}
+
+/**
+ * Ô tìm kiếm phiếu.
+ *
+ * Bỏ dấu ở CẢ hai vế (xem khopTimKiem): người trực gõ "dang nhap" phải ra
+ * "đăng nhập". Không có vế đó thì ô tìm kiếm im lặng trả về rỗng và người dùng
+ * kết luận phiếu không tồn tại.
+ */
+export function OTimKiem({
+  value, onChange, placeholder, className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn('relative min-w-0', className)}>
+      <Search
+        size={ICON.md}
+        className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+        aria-hidden
+      />
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder ?? 'Tìm theo tiêu đề, mã phiếu, trường, người gửi…'}
+        aria-label="Tìm kiếm phiếu"
+        className="w-full rounded-full border border-slate-200 bg-white py-2.5 pl-10 pr-9 text-[14px] tracking-[-0.016em] text-slate-900 placeholder:text-slate-400 focus:border-indigo-500"
+      />
+      {value && (
+        <button
+          type="button"
+          aria-label="Xoá từ khoá tìm kiếm"
+          onClick={() => onChange('')}
+          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        >
+          <X size={ICON.sm} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Phiếu có khớp từ khoá không. Bỏ dấu hai vế, khớp trên mọi ô người ta nhớ.
+ *
+ * Cố ý KHÔNG quét mô tả: mô tả là chỗ dễ lẫn thông tin cá nhân nhất (§12) và là
+ * nơi duy nhất dài tới mức một từ khoá bất kỳ cũng khớp — quét nó vào thì gõ
+ * "lỗi" ra gần như toàn bộ hàng đợi.
+ */
+export function khopTimKiem(
+  t: Pick<Ticket, 'ticketNo' | 'title' | 'campusId' | 'contactName' | 'contactEmail'>,
+  tuKhoa: string,
+  tenTruong?: string
+): boolean {
+  const q = removeDiacritics(tuKhoa).trim().toLowerCase();
+  if (!q) return true;
+  const kho = removeDiacritics(
+    [t.ticketNo, t.title, t.campusId, tenTruong ?? '', t.contactName, t.contactEmail].join(' ')
+  ).toLowerCase();
+  // Mọi từ đều phải có mặt, không cần liền nhau: gõ "ha nam dang nhap" vẫn ra
+  // phiếu đăng nhập của Hà Nam dù hai cụm nằm ở hai ô khác nhau.
+  return q.split(/\s+/).every((tu) => kho.includes(tu));
+}
+
+const MOI_TRANG = [10, 20, 50] as const;
+
+/**
+ * Chân danh sách: đang xem tới đâu, và đi trang khác.
+ *
+ * Câu "Hiển thị 1 – 10 trong 128 phiếu" quan trọng hơn cả dãy số trang. Không
+ * có nó thì một danh sách bị cắt ở 10 dòng trông y hệt một danh sách chỉ có 10
+ * phiếu, và người dùng kết luận sai về khối lượng việc đang tồn.
+ */
+export function PhanTrang({
+  tong, trang, moiTrang, onTrang, onMoiTrang, donVi = 'phiếu',
+}: {
+  tong: number;
+  /** Số trang, đếm từ 1. */
+  trang: number;
+  moiTrang: number;
+  onTrang: (t: number) => void;
+  onMoiTrang: (n: number) => void;
+  donVi?: string;
+}) {
+  const soTrang = Math.max(1, Math.ceil(tong / moiTrang));
+  const tu = tong === 0 ? 0 : (trang - 1) * moiTrang + 1;
+  const den = Math.min(tong, trang * moiTrang);
+  // Cửa sổ trượt tối đa 5 số quanh trang hiện tại: 16 trang mà in hết 16 nút
+  // thì hàng nút dài hơn cả nội dung nó điều khiển.
+  const dau = Math.max(1, Math.min(trang - 2, soTrang - 4));
+  const cacTrang = Array.from({ length: Math.min(5, soTrang) }, (_, i) => dau + i);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-[13px] tracking-[-0.016em] text-slate-500">
+      <span className="tabular-nums">
+        Hiển thị {tu} – {den} trong {tong} {donVi}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled={trang <= 1}
+          onClick={() => onTrang(trang - 1)}
+          aria-label="Trang trước"
+          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <ChevronLeft size={ICON.md} />
+        </button>
+        {cacTrang.map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onTrang(n)}
+            aria-current={n === trang ? 'page' : undefined}
+            className={cn(
+              'min-w-8 rounded-md px-2 py-1 text-[13px] tabular-nums transition-colors',
+              n === trang
+                ? 'bg-indigo-50 font-semibold text-indigo-700'
+                : 'text-slate-600 hover:bg-slate-100'
+            )}
+          >
+            {n}
+          </button>
+        ))}
+        <button
+          type="button"
+          disabled={trang >= soTrang}
+          onClick={() => onTrang(trang + 1)}
+          aria-label="Trang sau"
+          className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <ChevronRight size={ICON.md} />
+        </button>
+        <label className="ml-1.5 flex items-center gap-1.5">
+          <span className="sr-only">Số {donVi} mỗi trang</span>
+          <select
+            value={moiTrang}
+            onChange={(e) => { onMoiTrang(Number(e.target.value)); onTrang(1); }}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[13px] tabular-nums text-slate-700"
+          >
+            {MOI_TRANG.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <span className="whitespace-nowrap">{donVi}/trang</span>
+        </label>
+      </div>
+    </div>
   );
 }
