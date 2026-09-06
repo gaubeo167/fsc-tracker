@@ -444,7 +444,7 @@ export async function fetchTriageQueue(
         collection(db, TICKET_COL.tickets),
         where('moduleId', '==', moduleId),
         where('status', 'in', ['TRIAGE', 'NEEDS_INFO']),
-        orderBy('createdAt', 'asc'),
+        orderBy('createdAt', 'desc'),
         fsLimit(opts.limit ?? 50)
       )
     );
@@ -946,7 +946,17 @@ export async function fetchTriageQueueForModules(
       .map((d) => (normalizeTicket(d.id, d.data())))
       // Sắp xếp ở client: thêm orderBy vào truy vấn đã có hai mệnh đề `in` sẽ
       // đẩy số disjunction sau khai triển DNF lên rất nhanh và cần index riêng.
-      .sort((a, b) => a.createdAt - b.createdAt);
+      //
+      // MỚI NHẤT LÊN ĐẦU, thống nhất với mọi màn danh sách khác trong hệ thống
+      // (phiếu của trường, tất cả phiếu, đơn theo phân hệ). Trước đây hàng đợi
+      // này xếp ngược — cũ nhất lên đầu, theo lối "làm việc tồn trước" — nhưng
+      // một màn xếp khác ba màn còn lại thì người trực phải nhớ luật riêng của
+      // từng màn, và phiếu vừa gửi lại nằm tận đáy.
+      //
+      // Đánh đổi đã biết: phiếu tồn lâu nhất chìm xuống dưới. Cột "chờ N ngày"
+      // trên từng thẻ là thứ bù lại — nó nói tuổi phiếu ngay tại chỗ, không
+      // phải suy từ vị trí trong danh sách.
+      .sort((a, b) => b.createdAt - a.createdAt);
     return { tickets, error: null };
   } catch (error) {
     return { tickets: [], error: classifyError(error) };
