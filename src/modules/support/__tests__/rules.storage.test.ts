@@ -165,6 +165,69 @@ describe('ai xem được ảnh', () => {
 });
 
 // ===========================================================================
+// Ảnh đính kèm của TASK — nhánh task-images/.
+//
+// Nhánh này sinh ra vì ảnh task trước đây lưu base64 thẳng trong document
+// Firestore và vượt trần 1 MiB/document: người dùng bấm "Tạo Task" và nhận
+// 'The value of property "array" is longer than 1048487 bytes'.
+//
+// Test ở đây khoá hai thứ dễ hỏng nhất khi ai đó sửa rules về sau: nhánh mới
+// KHÔNG được nhận file ngoài ảnh, và KHÔNG được mở cho người ngoài tổ chức.
+// ===========================================================================
+describe('ảnh đính kèm của task', () => {
+  const PROJECT = 'du-an-abc';
+  const TASK = 'task-xyz';
+  const anhTask = `task-images/${PROJECT}/${TASK}/1757000000000_screenshot.png`;
+
+  it('người nội bộ tải ảnh task lên được', async () => {
+    const st = nguoi('u1', 'canbo@fpt.edu.vn').storage();
+    await assertSucceeds(uploadBytes(ref(st, anhTask), ANH, { contentType: 'image/jpeg' }));
+  });
+
+  it('người ngoài tổ chức KHÔNG tải lên được', async () => {
+    const st = nguoi('x', 'nguoila@gmail.com').storage();
+    await assertFails(uploadBytes(ref(st, anhTask), ANH, { contentType: 'image/jpeg' }));
+  });
+
+  it('CHỈ nhận ảnh — tài liệu cũng bị chặn, khác nhánh phiếu hỗ trợ', async () => {
+    // Ô này trên giao diện chỉ có nút "Thêm ảnh minh hoạ". Nhận thêm pdf/doc ở
+    // tầng rules là mở rộng bề mặt tấn công mà không ai dùng tới.
+    const st = nguoi('u1', 'canbo@fpt.edu.vn').storage();
+    await assertFails(
+      uploadBytes(ref(st, `task-images/${PROJECT}/${TASK}/tai-lieu.pdf`), ANH, {
+        contentType: 'application/pdf',
+      })
+    );
+  });
+
+  it('người nội bộ xem được ảnh task', async () => {
+    // Đúng bằng phạm vi hiện hành: firestore.rules để tasks đọc tự do với mọi
+    // tài khoản đã đăng nhập, nên ảnh base64 trong document task hôm nay cũng
+    // đã hiện với tất cả. Chuyển sang Storage không được làm ai mất quyền xem.
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await uploadBytes(ref(ctx.storage(), anhTask), ANH, { contentType: 'image/jpeg' });
+    });
+    await assertSucceeds(getBytes(ref(nguoi('u2', 'khac@fpt.edu.vn').storage(), anhTask)));
+  });
+
+  it('người chưa đăng nhập KHÔNG xem được', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await uploadBytes(ref(ctx.storage(), anhTask), ANH, { contentType: 'image/jpeg' });
+    });
+    await assertFails(getBytes(ref(testEnv.unauthenticatedContext().storage(), anhTask)));
+  });
+
+  it('xoá được — khác ảnh phiếu hỗ trợ, và đó là chủ đích', async () => {
+    // Người dùng gỡ ảnh ngay ở màn tạo task thì file chưa có document nào trỏ
+    // vào. Không cho xoá thì mỗi lần gỡ nhầm để lại một file mồ côi vĩnh viễn.
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await uploadBytes(ref(ctx.storage(), anhTask), ANH, { contentType: 'image/jpeg' });
+    });
+    await assertSucceeds(deleteObject(ref(nguoi('u1', 'canbo@fpt.edu.vn').storage(), anhTask)));
+  });
+});
+
+// ===========================================================================
 // Phép kiểm quan trọng nhất của file này.
 //
 // Test hành vi ở trên chạy trên emulator, mà emulator CHO firestore.get chạy

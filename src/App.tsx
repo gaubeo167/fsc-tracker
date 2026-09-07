@@ -126,6 +126,10 @@ function normalizeTask(raw: any): Task {
     progress: raw?.progress ?? 0,
   } as Task;
 }
+import { TaskImage } from './components/TaskImage';
+import {
+  TaskImageError, newDraftId, removeTaskImage, uploadTaskImage,
+} from './services/taskImages';
 import { PendingGate } from './modules/support/components/PendingGate';
 import { SupportAdminView } from './modules/support/components/admin/SupportAdminView';
 import { SupportView } from './modules/support/components/SupportView';
@@ -1281,6 +1285,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
   const [loading, setLoading] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [commentImage, setCommentImage] = useState<string | null>(null);
+  const [dangTaiAnh, setDangTaiAnh] = useState(false);
   const today = format(new Date(), 'yyyy-MM-dd');
   const [newSubtask, setNewSubtask] = useState({ text: '', deadline: (task.date && today > task.date) ? task.date : today });
   const [activeSubtaskComment, setActiveSubtaskComment] = useState<string | null>(null);
@@ -2068,24 +2073,41 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                     <FileText size={18} className="text-indigo-500" /> Mô tả chi tiết
                   </h3>
                   {isEditingMetadata && (
-                    <label className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg cursor-pointer transition-all flex items-center gap-2 text-xs font-bold">
-                      <ImageIcon size={14} />
-                      Thêm ảnh
+                    <label className={`p-2 text-indigo-600 rounded-lg transition-all flex items-center gap-2 text-xs font-bold ${dangTaiAnh ? 'opacity-50 cursor-wait' : 'hover:bg-indigo-50 cursor-pointer'}`}>
+                      {dangTaiAnh ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />}
+                      {dangTaiAnh ? 'Đang tải ảnh...' : 'Thêm ảnh'}
                       <input 
                         type="file" 
                         className="hidden" 
                         accept="image/*" 
-                        onChange={(e) => {
+                        disabled={dangTaiAnh}
+                        onChange={async (e) => {
                           const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onloadend = () => {
-                              setEditedTask({ 
-                                ...editedTask, 
-                                attachedImages: [...(editedTask.attachedImages || []), reader.result as string] 
-                              });
-                            };
-                            reader.readAsDataURL(file);
+                          e.target.value = '';
+                          if (!file || !profile) return;
+                          setDangTaiAnh(true);
+                          try {
+                            // Ảnh đi Storage, Firestore chỉ giữ đường dẫn — xem
+                            // ghi chú đầu services/taskImages.ts.
+                            const path = await uploadTaskImage({
+                              file,
+                              projectId: task.projectId,
+                              taskId: task.id,
+                              uploaderUid: profile.uid,
+                            });
+                            setEditedTask(prev => ({
+                              ...prev,
+                              attachedImages: [...(prev.attachedImages || []), path],
+                            }));
+                          } catch (err: any) {
+                            showToast(
+                              err instanceof TaskImageError
+                                ? err.message
+                                : `Không tải được ảnh lên (${err?.code ?? 'lỗi mạng'})`,
+                              'error'
+                            );
+                          } finally {
+                            setDangTaiAnh(false);
                           }
                         }}
                       />
@@ -2105,17 +2127,15 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                     {editedTask.attachedImages && editedTask.attachedImages.length > 0 && (
                       <div className="grid grid-cols-3 gap-2 mt-4">
                         {editedTask.attachedImages.map((img, idx) => (
-                          <div key={idx} className="relative group rounded-lg overflow-hidden border border-slate-200">
-                            <img 
-                              src={img} 
-                              alt="attached" 
-                              className="w-full h-24 object-cover cursor-zoom-in" 
+                          <div key={`${idx}-${img}`} className="relative group rounded-lg overflow-hidden border border-slate-200">
+                            <TaskImage
+                              value={img}
+                              className="w-full h-24 object-cover cursor-zoom-in"
                               onClick={() => setZoomedImage(img)}
-                              referrerPolicy="no-referrer"
                             />
                             {isEditingMetadata && (
                               <button 
-                                onClick={() => setEditedTask({ ...editedTask, attachedImages: editedTask.attachedImages.filter((_, i) => i !== idx) })}
+                                onClick={() => setEditedTask(prev => ({ ...prev, attachedImages: prev.attachedImages.filter((_, i) => i !== idx) }))}
                                 className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                               >
                                 <X size={10} />
@@ -2374,12 +2394,11 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                         </p>
                       </div>
                       {c.imageUrl && (
-                        <img 
-                          src={c.imageUrl} 
-                          alt="comment" 
-                          className="w-full h-32 object-cover rounded-lg cursor-zoom-in" 
+                        <TaskImage
+                          value={c.imageUrl}
+                          alt="Ảnh trong trao đổi"
+                          className="w-full h-32 object-cover rounded-lg cursor-zoom-in"
                           onClick={() => setZoomedImage(c.imageUrl!)}
-                          referrerPolicy="no-referrer"
                         />
                       )}
                     </div>
@@ -2390,7 +2409,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
               <div className="mt-auto space-y-3">
                 {commentImage && (
                   <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-slate-200">
-                    <img src={commentImage} alt="preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <TaskImage value={commentImage} alt="Ảnh sắp gửi" className="w-full h-full object-cover" />
                     <button onClick={() => setCommentImage(null)} className="absolute top-0 right-0 bg-red-500 text-white p-1 rounded-bl">
                       <X size={12} />
                     </button>
@@ -2404,18 +2423,39 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                     onChange={(e) => setNewComment(e.target.value)}
                   />
                   <div className="absolute bottom-3 right-3 flex gap-2">
-                    <label className="p-2 text-slate-400 hover:text-indigo-500 cursor-pointer transition-colors">
-                      <ImageIcon size={18} />
+                    <label className={`p-2 transition-colors ${dangTaiAnh ? 'text-slate-300 cursor-wait' : 'text-slate-400 hover:text-indigo-500 cursor-pointer'}`}>
+                      {dangTaiAnh ? <Loader2 size={18} className="animate-spin" /> : <ImageIcon size={18} />}
                       <input 
                         type="file" 
                         accept="image/*" 
                         className="hidden" 
-                        onChange={(e) => {
+                        disabled={dangTaiAnh}
+                        onChange={async (e) => {
                           const file = e.target.files?.[0];
-                          if (file) {
-                            const reader = new FileReader();
-                            reader.onloadend = () => setCommentImage(reader.result as string);
-                            reader.readAsDataURL(file);
+                          e.target.value = '';
+                          if (!file || !profile) return;
+                          setDangTaiAnh(true);
+                          try {
+                            // Ảnh bình luận nguy hiểm hơn ảnh minh hoạ: nó cộng
+                            // dồn vào mảng comments của CÙNG một document task,
+                            // nên base64 ở đây làm hỏng cả task chứ không chỉ
+                            // một lượt gửi.
+                            const path = await uploadTaskImage({
+                              file,
+                              projectId: task.projectId,
+                              taskId: task.id,
+                              uploaderUid: profile.uid,
+                            });
+                            setCommentImage(path);
+                          } catch (err: any) {
+                            showToast(
+                              err instanceof TaskImageError
+                                ? err.message
+                                : `Không tải được ảnh lên (${err?.code ?? 'lỗi mạng'})`,
+                              'error'
+                            );
+                          } finally {
+                            setDangTaiAnh(false);
                           }
                         }}
                       />
@@ -2461,7 +2501,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
 
         {zoomedImage && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center p-8 bg-black/90 backdrop-blur-md" onClick={(e) => { e.stopPropagation(); setZoomedImage(null); }}>
-            <img src={zoomedImage} alt="zoomed" className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" referrerPolicy="no-referrer" />
+            <TaskImage value={zoomedImage} alt="Ảnh phóng to" className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
             <button className="absolute top-8 right-8 text-white hover:text-slate-300 transition-colors" onClick={(e) => { e.stopPropagation(); setZoomedImage(null); }}>
               <X size={32} />
             </button>
@@ -4409,6 +4449,11 @@ const TaskCreateModal = ({
   const campusStaff = useCampusStaffUids(profile);
   const [projectId, setProjectId] = useState(initialProjectId || '');
   const [projects, setProjects] = useState<Project[]>([]);
+  // Ảnh được chọn TRƯỚC khi task tồn tại, nên phải có sẵn một mã thư mục để tải
+  // lên. useMemo với deps rỗng: mã phải đứng yên suốt vòng đời modal, sinh lại
+  // mỗi lượt render thì mỗi ảnh nằm một thư mục khác nhau.
+  const draftId = useMemo(() => newDraftId(), []);
+  const [dangTaiAnh, setDangTaiAnh] = useState(false);
   const [project, setProject] = useState<Project | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -4639,30 +4684,55 @@ const TaskCreateModal = ({
               </label>
               <div className="flex flex-wrap gap-2 mb-2">
                 {newTask.attachedImages.map((img, idx) => (
-                  <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200 group">
-                    <img src={img} alt="attached" className="w-full h-full object-cover" />
+                  <div key={`${idx}-${img}`} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200 group">
+                    <TaskImage value={img} className="w-full h-full object-cover" />
                     <button 
-                      onClick={() => setNewTask({ ...newTask, attachedImages: newTask.attachedImages.filter((_, i) => i !== idx) })}
+                      onClick={() => {
+                        setNewTask(prev => ({ ...prev, attachedImages: prev.attachedImages.filter((_, i) => i !== idx) }));
+                        // Task chưa tồn tại nên chưa có gì trỏ vào file này —
+                        // dọn luôn, đừng để lại rác trong bucket.
+                        void removeTaskImage(img);
+                      }}
                       className="absolute inset-0 bg-black/40 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <X size={14} />
                     </button>
                   </div>
                 ))}
-                <label className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-400 hover:border-indigo-500 hover:text-indigo-500 cursor-pointer transition-colors">
-                  <Plus size={20} />
+                <label className={`w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 flex items-center justify-center text-slate-400 transition-colors ${dangTaiAnh ? 'opacity-50 cursor-wait' : 'hover:border-indigo-500 hover:text-indigo-500 cursor-pointer'}`}>
+                  {dangTaiAnh ? <Loader2 size={20} className="animate-spin" /> : <Plus size={20} />}
                   <input 
                     type="file" 
                     accept="image/*" 
                     className="hidden" 
-                    onChange={(e) => {
+                    disabled={dangTaiAnh}
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                          setNewTask({ ...newTask, attachedImages: [...newTask.attachedImages, reader.result as string] });
-                        };
-                        reader.readAsDataURL(file);
+                      // Trả ô input về rỗng ngay: không có dòng này thì chọn lại
+                      // đúng file vừa gỡ ra sẽ không kích hoạt onChange lần nữa.
+                      e.target.value = '';
+                      if (!file || !profile) return;
+                      if (!projectId) {
+                        showToast('Chọn dự án trước khi thêm ảnh', 'error');
+                        return;
+                      }
+                      setDangTaiAnh(true);
+                      try {
+                        // Firestore chỉ nhận ĐƯỜNG DẪN. Nhét base64 vào đây là
+                        // vượt trần 1 MiB/document và không tạo được task.
+                        const path = await uploadTaskImage({
+                          file, projectId, taskId: draftId, uploaderUid: profile.uid,
+                        });
+                        setNewTask(prev => ({ ...prev, attachedImages: [...prev.attachedImages, path] }));
+                      } catch (err: any) {
+                        showToast(
+                          err instanceof TaskImageError
+                            ? err.message
+                            : `Không tải được ảnh lên (${err?.code ?? 'lỗi mạng'})`,
+                          'error'
+                        );
+                      } finally {
+                        setDangTaiAnh(false);
                       }
                     }}
                   />
@@ -4771,7 +4841,7 @@ const TaskCreateModal = ({
           </div>
           <div className="flex gap-3 pt-4">
             <Button variant="ghost" className="flex-1" onClick={onClose}>Hủy</Button>
-            <Button className="flex-1" onClick={addTask} disabled={loading}>{loading ? 'Đang tạo...' : 'Tạo Task'}</Button>
+            <Button className="flex-1" onClick={addTask} disabled={loading || dangTaiAnh}>{loading ? 'Đang tạo...' : dangTaiAnh ? 'Đang tải ảnh...' : 'Tạo Task'}</Button>
           </div>
         </div>
       </motion.div>

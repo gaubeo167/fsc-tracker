@@ -146,5 +146,56 @@ service firebase.storage {
       // ảnh cũng vậy, nếu không người ta xoá bằng chứng sau khi phiếu bị từ chối.
       allow delete: if false;
     }
+
+    // ------------------------------------------------------------------
+    // Ảnh đính kèm của task (module theo dõi công việc).
+    //
+    // Đường dẫn: task-images/{projectId}/{taskId}/{fileName}
+    //
+    // Vì sao thêm nhánh này: trước đây ảnh task được lưu base64 thẳng trong
+    // document Firestore và vượt trần 1 MiB/document, người dùng không tạo
+    // được task. Ảnh chuyển sang đây, Firestore chỉ giữ đường dẫn.
+    //
+    // {taskId} là id task thật, hoặc mã draft sinh ở client khi người dùng
+    // đính ảnh trước lúc task tồn tại (màn tạo task).
+    // ------------------------------------------------------------------
+    match /task-images/{projectId}/{taskId}/{fileName} {
+
+      /**
+       * Người nội bộ nào cũng xem được, ĐÚNG BẰNG phạm vi hiện hành.
+       *
+       * Không phải nới quyền: firestore.rules đang để `allow read: if
+       * isAuthenticated()` trên projects/{projectId}/tasks/{taskId}, nên ảnh
+       * base64 nằm trong document task hôm nay cũng đã hiện với mọi người đăng
+       * nhập. Chuyển sang Storage giữ nguyên phạm vi đó, không ai mất quyền xem
+       * và cũng không ai được thêm quyền.
+       *
+       * Vẫn KHÔNG gọi firestore.get để kiểm quyền theo dự án — xem lời cảnh báo
+       * đầu file, cross-service rules không chạy trên project này.
+       */
+      allow read: if laNguoiNoiBo();
+
+      /**
+       * `create, update` chứ KHÔNG phải `write`: `write` gộp cả delete nên nó
+       * làm câu `allow delete` bên dưới thành vô nghĩa.
+       */
+      allow create, update: if laNguoiNoiBo()
+                   // §10: tối đa 10MB mỗi file, khớp validateImageFile().
+                   && request.resource.size <= 10 * 1024 * 1024
+                   // Chỉ ảnh. Ô này chỉ nhận ảnh minh hoạ, không phải chỗ chứa
+                   // tài liệu, càng không phải chỗ phát tán file thực thi.
+                   && request.resource.contentType.matches('image/.*');
+
+      /**
+       * Cho xoá, khác với ảnh phiếu hỗ trợ.
+       *
+       * Ảnh phiếu là bằng chứng của người báo lỗi nên khoá cứng. Còn đây là ảnh
+       * minh hoạ do chính người làm việc đính vào task của mình, và màn sửa task
+       * vốn đã có nút gỡ ảnh. Không cho xoá thì mỗi lần gỡ nhầm lại bỏ lại một
+       * file mồ côi trong bucket, không ai dọn được.
+       */
+      allow delete: if laNguoiNoiBo();
+    }
+
   }
 }
