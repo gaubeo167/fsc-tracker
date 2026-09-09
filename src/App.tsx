@@ -131,6 +131,7 @@ import {
   TaskImageError, newDraftId, removeTaskImage, uploadTaskImage,
 } from './services/taskImages';
 import { OnboardingGate } from './modules/support/components/OnboardingGate';
+import { nhanDienWebview } from './services/inAppBrowser';
 import { SupportAdminView } from './modules/support/components/admin/SupportAdminView';
 import { SupportView } from './modules/support/components/SupportView';
 import { PtudSupportView } from './modules/support/components/PtudSupportView';
@@ -5553,6 +5554,11 @@ function AuthConsumer({
 }) {
   const { user, profile, loading, error, profileError, signIn, logout, retryProfile } = useAuth();
   const { showToast } = useToast();
+  // Nhận một lần lúc dựng: User-Agent không đổi giữa chừng.
+  const webview = useMemo(
+    () => nhanDienWebview(typeof navigator === 'undefined' ? '' : navigator.userAgent),
+    []
+  );
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   /**
    * Thanh menu trái đang thu gọn thành dải icon hay không. CHỈ áp cho desktop —
@@ -5670,6 +5676,40 @@ function AuthConsumer({
           <h1 className="text-3xl font-bold text-slate-900 mb-2">FSC Tracker</h1>
           <p className="text-slate-500">Hệ thống quản lý dự án FPT School</p>
         </div>
+
+        {/* Mở từ trong Zalo/Facebook thì đăng nhập Google KHÔNG BAO GIỜ xong.
+            Webview của các ứng dụng đó phân vùng sessionStorage giữa tên miền
+            app và tên miền xử lý đăng nhập của Firebase, nên state OAuth mất
+            khi quay về. Đã thử thật 21/08/2026: cả popup lẫn redirect đều hỏng,
+            nên không có phương án dự phòng kỹ thuật nào.
+            Người dùng chỉ thấy một trang trắng của Firebase với dòng tiếng Anh
+            "missing initial state" — trang đó của Firebase, ta không sửa được
+            chữ nào trên đó. Nên phải chặn TRƯỚC, ngay tại đây. */}
+        {webview.laWebview && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-left">
+            <p className="flex items-center gap-2 text-sm font-bold text-amber-900">
+              <AlertCircle size={16} /> Hãy mở bằng trình duyệt
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-amber-800">
+              Bạn đang mở trang này bên trong ứng dụng {webview.ten || 'khác'}. Đăng nhập Google
+              không chạy được ở đây, vì ứng dụng đó chặn bộ nhớ tạm mà Google cần để xác thực.
+            </p>
+            <p className="mt-2 text-xs font-semibold text-amber-900">
+              {webview.laIOS
+                ? 'Bấm biểu tượng chia sẻ hoặc la bàn ở thanh dưới, chọn "Mở trong Safari".'
+                : 'Bấm dấu ba chấm ở góc trên, chọn "Mở bằng trình duyệt".'}
+            </p>
+            <button
+              onClick={() => {
+                void navigator.clipboard?.writeText(window.location.href);
+                showToast('Đã sao chép liên kết. Dán vào Chrome hoặc Safari để đăng nhập.');
+              }}
+              className="mt-3 w-full rounded-full border border-amber-300 bg-white px-4 py-2 text-xs font-bold text-amber-900"
+            >
+              Sao chép liên kết
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600 text-xs text-left space-y-2">
