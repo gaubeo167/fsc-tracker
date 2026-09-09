@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, createContext, useContext, Component } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, createContext, useContext, Component } from 'react';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -305,8 +305,18 @@ interface AuthContextType {
   profile: UserProfile | null;
   loading: boolean;
   error: string | null;
+  /**
+   * Lượt tải hồ sơ vừa rồi HỎNG, kèm mã lỗi.
+   *
+   * Khác hẳn `profile === null` không có lỗi — cái đó nghĩa là tài khoản thật
+   * sự chưa có hồ sơ. Gộp hai thứ vào một màn hình là lý do người dùng bị bảo
+   * "đăng xuất rồi đăng nhập lại" trong khi nguyên nhân là mất mạng.
+   */
+  profileError: { code: string; message: string } | null;
   signIn: () => Promise<void>;
   logout: () => Promise<void>;
+  /** Tải lại hồ sơ mà KHÔNG bắt đăng xuất. Dùng cho nút "Thử lại". */
+  retryProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -317,11 +327,17 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<{ code: string; message: string } | null>(null);
 
-  useEffect(() => {
-    console.log('AuthProvider: Initializing auth state listener...');
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+  // Tải hồ sơ người dùng.
+  //
+  // Tách khỏi listener để nút "Thử lại" gọi lại được ĐÚNG luồng này. Trước đây
+  // mọi lỗi ở đây đều kết thúc ở một màn hình bảo người dùng đăng xuất rồi đăng
+  // nhập lại — vô ích khi nguyên nhân là mất mạng hay rules chặn, và còn đẩy họ
+  // ra màn đăng nhập, xa hơn chỗ họ đang đứng.
+  const napHoSo = useCallback(async (user: FirebaseUser | null) => {
       console.log('AuthProvider: Auth state changed:', user?.email);
+      setProfileError(null);
       try {
         if (user) {
           // Domain check
@@ -406,14 +422,37 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (err: any) {
         console.error('AuthProvider: Auth state change error:', err);
-        setError(err.message || 'Lỗi xác thực');
+        // Giữ nguyên err.code: "permission-denied" (rules chặn) và
+        // "unavailable" (không với tới được máy chủ) là hai chuyện khác hẳn
+        // nhau, và người đi sửa cần biết là chuyện nào.
+        setProfileError({
+          code: err?.code || 'unknown',
+          message: err?.message || 'Lỗi không rõ',
+        });
+        // Cố ý KHÔNG setError ở đây nữa: màn hình dành riêng bên dưới đã nói
+        // đúng câu chuyện này rồi, còn setError bật thêm hộp đỏ nổi ở góc với
+        // NGUYÊN VĂN tiếng Anh của Firebase. Hai thông báo cho một sự việc, một
+        // cái tiếng Việt một cái tiếng Anh, chỉ làm người đọc tưởng có hai lỗi.
+        // setError vẫn dùng cho lỗi đăng nhập (sai tên miền, popup bị chặn).
         // Don't throw here to avoid crashing the auth listener
       } finally {
         setLoading(false);
       }
+  }, []);
+
+  useEffect(() => {
+    console.log('AuthProvider: Initializing auth state listener...');
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      void napHoSo(user);
     });
     return unsubscribe;
-  }, []);
+  }, [napHoSo]);
+
+  /** Thử tải lại hồ sơ cho tài khoản đang đăng nhập. */
+  const retryProfile = useCallback(async () => {
+    setLoading(true);
+    await napHoSo(auth.currentUser);
+  }, [napHoSo]);
 
   const signIn = async () => {
     try {
@@ -442,7 +481,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, error, signIn, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, error, profileError, signIn, logout, retryProfile }}>
       {children}
       {error && (
         <div className="fixed bottom-4 right-4 z-50 bg-red-50 border border-red-200 p-4 rounded-xl shadow-lg max-w-sm animate-in fade-in slide-in-from-bottom-4">
@@ -5512,7 +5551,7 @@ function AuthConsumer({
   activeNav: string;
   setActiveNav: (nav: string) => void;
 }) {
-  const { user, profile, loading, error, signIn, logout } = useAuth();
+  const { user, profile, loading, error, profileError, signIn, logout, retryProfile } = useAuth();
   const { showToast } = useToast();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   /**
@@ -5668,15 +5707,51 @@ function AuthConsumer({
     </div>
   );
 
+  // Đăng nhập được nhưng không có hồ sơ. HAI nguyên nhân hoàn toàn khác nhau,
+  // và bản trước gộp chúng vào một câu duy nhất: "thử đăng xuất và đăng nhập lại".
+  //
+  //   1. Lượt đọc HỎNG (mất mạng, máy chủ dữ liệu không trả lời, rules chặn).
+  //      Đăng xuất chẳng sửa được gì, mà còn đẩy người dùng ra màn đăng nhập —
+  //      xa hơn chỗ họ đang đứng, và trên bản chạy local thì không quay lại được.
+  //   2. Tài khoản THẬT SỰ chưa có hồ sơ. Lúc đó đăng nhập lại mới có nghĩa.
+  //
+  // Cùng một màn hình trắng cho cả hai là lý do một lần tắt máy chủ dữ liệu bị
+  // báo về thành "hệ thống không tạo được hồ sơ cho tôi".
   if (user && !profile && !loading) {
+    const laLoiQuyen = profileError?.code === 'permission-denied';
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-slate-50">
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-50 px-6">
         <AlertCircle size={48} className="text-red-500 mb-4" />
-        <h2 className="text-xl font-bold text-slate-900 mb-2">Không thể tải hồ sơ người dùng</h2>
-        <p className="text-slate-500 mb-6 text-center max-w-xs">Hệ thống không thể tìm thấy hoặc tạo hồ sơ cho tài khoản của bạn. Vui lòng thử đăng xuất và đăng nhập lại.</p>
-        <Button onClick={logout} className="bg-red-600 hover:bg-red-700">
-          <LogOut size={18} className="mr-2" /> Đăng xuất
-        </Button>
+        <h2 className="text-xl font-bold text-slate-900 mb-2 text-center">
+          {profileError
+            ? (laLoiQuyen ? 'Bạn không có quyền đọc dữ liệu tài khoản' : 'Không đọc được dữ liệu tài khoản')
+            : 'Không thể tải hồ sơ người dùng'}
+        </h2>
+        <p className="text-slate-500 mb-2 text-center max-w-sm">
+          {profileError
+            ? (laLoiQuyen
+                ? 'Đăng nhập thành công, nhưng máy chủ dữ liệu từ chối lượt đọc hồ sơ. Đây là lỗi phân quyền, không phải tài khoản của bạn hỏng.'
+                : 'Đăng nhập thành công, nhưng không với tới được máy chủ dữ liệu. Thường là mất mạng, hoặc máy chủ dữ liệu đang tắt.')
+            : 'Hệ thống không tìm thấy và cũng không tạo được hồ sơ cho tài khoản của bạn. Thử đăng xuất và đăng nhập lại.'}
+        </p>
+        {/* Mã lỗi hiện ra để một ảnh chụp màn hình là đủ làm báo lỗi. */}
+        {profileError && (
+          <p className="mb-6 max-w-sm text-center font-mono text-xs text-slate-400 break-words">
+            {profileError.code} — {profileError.message}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {/* Thử lại TRƯỚC đăng xuất, và là nút chính: gần như mọi lần rơi vào
+              đây đều là lỗi tạm, mà đăng xuất thì không sửa được lỗi tạm nào. */}
+          {profileError && (
+            <Button onClick={() => void retryProfile()}>
+              <RefreshCw size={18} className="mr-2" /> Thử lại
+            </Button>
+          )}
+          <Button variant="outline" onClick={logout}>
+            <LogOut size={18} className="mr-2" /> Đăng xuất
+          </Button>
+        </div>
       </div>
     );
   }
