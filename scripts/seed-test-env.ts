@@ -100,16 +100,30 @@ async function main() {
   // 'notifications' PHẢI có trong danh sách. Thông báo mang ticketId 't-1'…
   // 't-5'; lần chạy sau tạo lại đúng những id đó với nội dung khác, nên thông
   // báo cũ lặng lẽ bám sang phiếu mới và chỉ sang sai phiếu.
+  //
+  // Mọi collection có SUBCOLLECTION phải xoá con trước: xoá document cha KHÔNG
+  // xoá con trong Firestore, con thành mồ côi và lần sau vẫn đọc ra được.
   for (const c of ['users', 'support_campuses', 'support_role_assignments', 'support_unit_claims',
                    'support_tickets',
                    'support_ticket_index', 'support_counters', 'support_ticket_numbers',
                    'support_modules', 'support_sla_policies', 'support_config', 'projects',
-                   'notifications']) {
+                   'notifications',
+                   // Ba collection của phần thông báo qua email. Thiếu chúng ở đây
+                   // thì mỗi lần seed lại để sót nhóm và mẫu của lần trước, và
+                   // chạy hai lần là có hai nhóm trùng tên — đúng thứ script này
+                   // sinh ra để tránh.
+                   'support_notify_groups', 'support_email_templates', 'support_announcements']) {
     const snap = await db.collection(c).get();
     if (c === 'projects') {
       for (const d of snap.docs) {
         const tasks = await d.ref.collection('tasks').get();
         await Promise.all(tasks.docs.map((t) => t.ref.delete()));
+      }
+    }
+    if (c === 'support_announcements') {
+      for (const d of snap.docs) {
+        const ds = await d.ref.collection('deliveries').get();
+        await Promise.all(ds.docs.map((x) => x.ref.delete()));
       }
     }
     await Promise.all(snap.docs.map((d) => d.ref.delete()));
