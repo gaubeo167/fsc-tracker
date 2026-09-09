@@ -90,6 +90,116 @@ export const vi = {
     loadFailed: 'Không tải được danh sách trường',
   },
 
+  notify: {
+    title: 'Thông báo qua email',
+    subtitle: 'Nhóm người nhận, mẫu nội dung, và lịch sử các lần đã gửi',
+    tabGroups: 'Nhóm nhận tin',
+    tabTemplates: 'Mẫu email',
+    tabCompose: 'Gửi thông báo',
+    tabHistory: 'Lịch sử gửi',
+
+    group: {
+      title: 'Nhóm nhận tin',
+      subtitle: 'Danh sách email dùng lại cho mọi lần gửi sau. Tạo một lần, dùng mãi.',
+      addNew: 'Tạo nhóm',
+      name: 'Tên nhóm',
+      nameHint: 'Ví dụ: Hiệu trưởng các trường, Đầu mối CNTT',
+      description: 'Ghi chú',
+      descriptionHint: 'Nhóm này dùng để báo việc gì. Không bắt buộc.',
+      recipients: 'Danh sách email',
+      recipientsHint:
+        'Dán thẳng một cột từ Excel, hoặc gõ cách nhau bằng dấu phẩy. Nhận cả dạng Tên <email>.',
+      count: (n: number) => `${n} người nhận`,
+      empty: 'Chưa có nhóm nào',
+      emptyHint: 'Tạo nhóm đầu tiên để gửi thông báo cho đúng người mà không phải chép email mỗi lần.',
+      invalidFound: (n: number) => `${n} dòng không phải email, đã bỏ qua`,
+      invalidList: 'Những dòng bị bỏ qua',
+      trimmed: (n: number) => `Đã cắt bớt ${n} địa chỉ vượt quá giới hạn`,
+      duplicateRemoved: (n: number) => `Đã bỏ ${n} địa chỉ trùng`,
+      confirmDelete: (name: string) =>
+        `Xoá nhóm "${name}"? Lịch sử các lần đã gửi vẫn giữ nguyên.`,
+      viewMembers: 'Xem danh sách',
+      hideMembers: 'Thu gọn',
+      saved: 'Đã lưu nhóm',
+      deleted: 'Đã xoá nhóm',
+    },
+
+    template: {
+      title: 'Mẫu email',
+      subtitle: 'Soạn sẵn nội dung cho những lần báo giống nhau, khỏi viết lại từ đầu.',
+      addNew: 'Tạo mẫu',
+      name: 'Tên mẫu',
+      nameHint: 'Ví dụ: Thông báo tính năng mới',
+      subject: 'Tiêu đề thư',
+      body: 'Nội dung thư',
+      bodyHint: 'Chữ thuần, không định dạng. Xuống dòng giữ nguyên như bạn gõ.',
+      placeholders: 'Chỗ điền tự động',
+      placeholdersHint: 'Bấm để chèn vào chỗ con trỏ. Hệ thống thay bằng giá trị thật lúc gửi.',
+      unknownPlaceholder: (list: string) =>
+        `Chỗ điền không hợp lệ: ${list}. Người nhận sẽ thấy nguyên chữ này trong thư.`,
+      empty: 'Chưa có mẫu nào',
+      emptyHint: 'Tạo mẫu để lần sau chỉ cần chọn rồi bấm gửi.',
+      confirmDelete: (name: string) => `Xoá mẫu "${name}"?`,
+      saved: 'Đã lưu mẫu',
+      deleted: 'Đã xoá mẫu',
+      preview: 'Xem trước',
+    },
+
+    compose: {
+      title: 'Gửi thông báo',
+      subtitle: 'Chọn nhóm, chọn mẫu, xem trước rồi gửi. Thư đi từ hộp thư của chính bạn.',
+      useTemplate: 'Dùng mẫu',
+      noTemplate: '— Tự soạn, không dùng mẫu —',
+      templateApplied: 'Đã điền nội dung từ mẫu. Sửa thoải mái, mẫu gốc không đổi.',
+      pickGroups: 'Gửi cho nhóm',
+      noGroupPicked: 'Chưa chọn nhóm nào',
+      totalRecipients: (n: number) => `${n} người nhận, đã bỏ trùng`,
+      previewFor: (email: string) => `Xem trước thư gửi tới ${email}`,
+      sender: 'Gửi từ hộp thư',
+      connectGmail: 'Kết nối Gmail để gửi',
+      connecting: 'Đang mở cửa sổ Google…',
+      connected: 'Đã kết nối. Phiên gửi có hiệu lực khoảng một giờ.',
+      connectHint:
+        'Google sẽ hỏi bạn cho phép ứng dụng gửi thư thay bạn. Ứng dụng chỉ xin quyền GỬI, không đọc được hộp thư của bạn.',
+      send: (n: number) => `Gửi cho ${n} người`,
+      confirmSend: (n: number, from: string) =>
+        `Gửi thật ${n} email từ hộp thư ${from}?
+
+Thư đi ngay khi bạn bấm OK và không thu hồi được.`,
+      sending: (da: number, tong: number) => `Đang gửi ${da}/${tong}…`,
+      keepTabOpen: 'Giữ nguyên tab này tới khi gửi xong. Đóng tab là dừng giữa chừng.',
+      stop: 'Dừng gửi',
+      done: (sent: number, failed: number) =>
+        failed === 0 ? `Đã gửi xong ${sent} thư` : `Đã gửi ${sent} thư, ${failed} thư hỏng`,
+      needSubject: 'Chưa nhập tiêu đề thư',
+      needBody: 'Chưa nhập nội dung thư',
+      needGroup: 'Chưa chọn nhóm nào',
+      needGmail: 'Chưa kết nối Gmail',
+      copyList: 'Sao chép danh sách email',
+      copied: (n: number) => `Đã sao chép ${n} địa chỉ. Dán vào ô BCC của Gmail là gửi tay được.`,
+    },
+
+    history: {
+      title: 'Lịch sử gửi',
+      subtitle: 'Mỗi dòng là một lần gửi có thật, kèm nội dung và người nhận lúc đó.',
+      empty: 'Chưa gửi lần nào',
+      emptyHint: 'Các lần gửi sẽ được ghi lại ở đây, kể cả lần gửi hỏng.',
+      status: {
+        DRAFT: 'Nháp',
+        SENDING: 'Đang gửi / còn dở',
+        SENT: 'Đã gửi xong',
+        PARTIAL: 'Gửi thiếu',
+        FAILED: 'Hỏng',
+      } satisfies Record<string, string>,
+      counts: (sent: number, failed: number, total: number) =>
+        `${sent}/${total} đã gửi${failed > 0 ? `, ${failed} hỏng` : ''}`,
+      resume: 'Gửi tiếp người chưa nhận',
+      viewFailed: 'Xem những địa chỉ hỏng',
+      sentBy: 'Người gửi',
+      groups: 'Nhóm đã gửi',
+    },
+  },
+
   gate: {
     title: 'Tài khoản đang chờ duyệt',
     body: 'Tài khoản của bạn đã đăng nhập thành công nhưng chưa được quản trị viên duyệt và gán vào trường. Trong lúc chờ, bạn chưa xem được dữ liệu nào.',

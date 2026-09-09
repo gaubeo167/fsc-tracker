@@ -161,6 +161,123 @@ export interface SupportRoleAssignment {
   assignedAt?: Timestamp;
 }
 
+// ===========================================================================
+// THÔNG BÁO ĐỒNG LOẠT QUA EMAIL
+//
+// Bài toán: xong một tính năng lớn thì phải báo cho đúng những người dùng nó —
+// hiệu trưởng 18 cơ sở, đầu mối CNTT, giáo viên một phân hệ. Hôm nay việc đó là
+// mở Excel, chép một cột email, dán vào Gmail, và cầu cho không sót ai.
+//
+// Ba mảnh, tách rời có chủ ý:
+//   NotifyGroup    — DANH SÁCH gửi, quản lý một lần rồi dùng lại mãi
+//   EmailTemplate  — MẪU nội dung, soạn sẵn cho những lần báo giống nhau
+//   Announcement   — một LẦN GỬI có thật: chép cứng nội dung và người nhận
+//
+// Vì sao Announcement chép cứng thay vì trỏ tới nhóm và mẫu: sửa nhóm hay sửa
+// mẫu sáu tháng sau KHÔNG được phép làm đổi lịch sử. Câu hỏi "hôm đó tôi đã gửi
+// gì, cho ai" phải trả lời được bằng đúng document đó, không phải bằng cách
+// dựng lại từ những thứ đã đổi.
+// ===========================================================================
+
+export const NOTIFY_COL = {
+  groups: 'support_notify_groups',
+  templates: 'support_email_templates',
+  announcements: 'support_announcements',
+  /** Subcollection dưới mỗi thông báo: support_announcements/{id}/deliveries. */
+  deliveries: 'deliveries',
+} as const;
+
+/** Một người nhận. `name` rỗng nếu chỉ dán mỗi địa chỉ. */
+export interface NotifyRecipient {
+  /** Đã chuẩn hoá viết thường. Là khoá khử trùng khi gộp nhiều nhóm. */
+  email: string;
+  name: string;
+}
+
+/**
+ * Một nhóm nhận tin, ví dụ "Hiệu trưởng các trường" hay "Đầu mối CNTT".
+ *
+ * Danh sách người nhận nằm THẲNG trên document dưới dạng mảng, không phải
+ * subcollection. Đánh đổi đã cân nhắc: một nhóm là thứ đọc nguyên khối (gửi thì
+ * cần cả danh sách) và chỉ một admin sửa mỗi lần, nên mảng vừa rẻ vừa đơn giản.
+ * Cái giá phải trả: hai admin sửa cùng một nhóm cùng lúc thì người lưu sau đè
+ * mất người lưu trước, và document Firestore trần 1 MiB. Vì vậy có MAX_RECIPIENTS.
+ */
+export interface NotifyGroup {
+  id: string;
+  name: string;
+  description: string;
+  recipients: NotifyRecipient[];
+  isActive: boolean;
+  createdAt?: Timestamp;
+  createdBy?: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+}
+
+/**
+ * Trần số người nhận trong MỘT nhóm.
+ *
+ * 1000 địa chỉ ~ 60 KB, còn xa trần 1 MiB của document. Con số này không phải
+ * giới hạn kỹ thuật mà là chốt chặn để một lần dán nhầm cả file Excel không
+ * lặng lẽ tạo ra một nhóm khổng lồ rồi bắn đi.
+ */
+export const MAX_RECIPIENTS_PER_GROUP = 1000;
+
+/** Mẫu nội dung soạn sẵn. Chỗ điền động xem services/emailTemplate.ts. */
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  isActive: boolean;
+  createdAt?: Timestamp;
+  createdBy?: string;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
+}
+
+/**
+ * Trạng thái một lần gửi.
+ *
+ * PARTIAL tồn tại vì gửi hàng trăm email là chuyện gửi từng cái một, và một cái
+ * hỏng KHÔNG làm hỏng cả lượt. Gộp PARTIAL vào SENT thì người gửi tưởng đã xong;
+ * gộp vào FAILED thì họ gửi lại cả nhóm và người đã nhận bị nhận hai lần.
+ */
+export type AnnouncementStatus = 'DRAFT' | 'SENDING' | 'SENT' | 'PARTIAL' | 'FAILED';
+
+export interface Announcement {
+  id: string;
+  /** Chép cứng lúc gửi, KHÔNG trỏ tới mẫu. Xem ghi chú đầu khối. */
+  subject: string;
+  body: string;
+  templateId: string | null;
+  templateName: string;
+  groupIds: string[];
+  /** Chép cứng: nhóm có thể bị đổi tên hoặc xoá sau này. */
+  groupNames: string[];
+  total: number;
+  sentCount: number;
+  failedCount: number;
+  status: AnnouncementStatus;
+  /** Hộp thư đã dùng để gửi. Mail đi từ tài khoản của chính người bấm nút. */
+  senderEmail: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt?: Timestamp;
+  finishedAt?: Timestamp;
+}
+
+/** Một lượt gửi tới MỘT địa chỉ. Doc id là email đã mã hoá cho an toàn đường dẫn. */
+export interface Delivery {
+  email: string;
+  name: string;
+  status: 'PENDING' | 'SENT' | 'FAILED';
+  /** Lý do hỏng, giữ nguyên văn của Gmail để tra được. */
+  error?: string;
+  sentAt?: Timestamp;
+}
+
 /** Lỗi nghiệp vụ có mã, để một ảnh chụp màn hình là đủ làm bug report. */
 export class DomainError extends Error {
   constructor(

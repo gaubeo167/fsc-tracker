@@ -446,6 +446,47 @@ service cloud.firestore {
         && job.size() <= 100;
     }
 
+    // ===============================================================
+    // THÔNG BÁO ĐỒNG LOẠT QUA EMAIL
+    //
+    // Cả ba collection dưới đây CHỈ admin đọc và ghi. Không nới cho vai trò nào
+    // khác, kể cả PTUD_MANAGER:
+    //   - Nhóm nhận tin là danh sách địa chỉ email của hiệu trưởng và cán bộ 18
+    //     cơ sở. Đó là dữ liệu cá nhân, không phải danh bạ công khai.
+    //   - Ai ghi được vào đây là gửi được thư hàng loạt DANH NGHĨA nhà trường.
+    //
+    // Thư đi từ hộp thư Gmail của chính người bấm nút, không phải từ máy chủ,
+    // nên rules ở đây là hàng rào DUY NHẤT — không có tầng server nào chặn hộ.
+    // ===============================================================
+
+    match /support_notify_groups/{groupId} {
+      allow read: if isAdmin();
+      // Trần 1000 người nhận mỗi nhóm. Chốt chặn để một lần dán nhầm cả file
+      // Excel không lặng lẽ tạo ra một nhóm khổng lồ rồi bắn đi.
+      allow create, update: if isAdmin()
+                              && request.resource.data.recipients.size() <= 1000;
+      allow delete: if isAdmin();
+    }
+
+    match /support_email_templates/{templateId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Lịch sử các lần đã gửi. Mỗi document chép cứng nội dung và tên nhóm tại
+    // thời điểm gửi, nên sửa nhóm hay sửa mẫu về sau không làm đổi lịch sử.
+    match /support_announcements/{announcementId} {
+      allow read, create, update: if isAdmin();
+      // Không cho xoá: đây là sổ ghi "đã gửi gì, cho ai, ngày nào". Xoá được
+      // thì nó không còn là bằng chứng của bất cứ điều gì.
+      allow delete: if false;
+
+      // Từng lượt gửi tới từng địa chỉ. Trình duyệt của admin ghi trạng thái
+      // vào đây trong lúc gửi, nên nó phải ghi được — nhưng vẫn chỉ admin.
+      match /deliveries/{deliveryId} {
+        allow read, write: if isAdmin();
+      }
+    }
+
     // Dữ liệu tham chiếu: 5 phân hệ, ma trận SLA, lịch làm việc, ngày lễ.
     //
     // Đọc: mọi tài khoản đã duyệt. Client cần ma trận SLA để hiện "SLA phản hồi

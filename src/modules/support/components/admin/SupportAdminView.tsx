@@ -1,5 +1,5 @@
 import {
-  Building2, ClipboardList, FolderGit2, Headset, Inbox, Layers, ListTodo, UserCheck,
+  Building2, ClipboardList, FolderGit2, Headset, Inbox, Layers, ListTodo, Megaphone, UserCheck,
 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { cn } from '../../../../components/ui';
@@ -10,6 +10,7 @@ import { AllTicketsView } from './AllTicketsView';
 import { ModuleManager } from './ModuleManager';
 import { ProjectManager } from './ProjectManager';
 import { CampusManager } from './CampusManager';
+import { NotifyCenter } from './NotifyCenter';
 import { UserApprovalQueue } from './UserApprovalQueue';
 
 // ===========================================================================
@@ -41,6 +42,7 @@ const TABS = [
   { id: 'projects', label: 'Dự án', icon: FolderGit2, nhom: 'thiet-lap' },
   { id: 'modules', label: 'Phân hệ', icon: Layers, nhom: 'thiet-lap' },
   { id: 'approval', label: 'Duyệt tài khoản', icon: UserCheck, nhom: 'thiet-lap' },
+  { id: 'notify', label: 'Thông báo', icon: Megaphone, nhom: 'thiet-lap' },
 ] as const;
 
 export function SupportAdminView({ actorUid, onToast }: { actorUid: string; onToast: Toast }) {
@@ -116,6 +118,7 @@ export function SupportAdminView({ actorUid, onToast }: { actorUid: string; onTo
       {tab === 'modules' && <ModuleManager onToast={onToast} />}
       {tab === 'approval' && <UserApprovalQueue actorUid={actorUid} onToast={onToast} />}
       {tab === 'campus' && <CampusManager actorUid={actorUid} onToast={onToast} />}
+      {tab === 'notify' && <NotifyCenter actorUid={actorUid} onToast={onToast} />}
     </div>
   );
 }
