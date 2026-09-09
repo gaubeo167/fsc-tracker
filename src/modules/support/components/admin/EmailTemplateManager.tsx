@@ -280,9 +280,13 @@ export function EmailTemplateManager({ actorUid, onToast }: { actorUid: string; 
                     <p className="truncate text-xs text-slate-500">{t.subject}</p>
                   </div>
                   <div className="flex gap-1">
+                    {/* Xem trước và Xoá đều chỉ có icon — phải đặt tên, xem
+                        ghi chú cùng chỗ ở NotifyGroupManager. */}
                     <Button
                       size="sm"
                       variant="ghost"
+                      title={`Xem trước mẫu ${t.name}`}
+                      aria-label={`Xem trước mẫu ${t.name}`}
                       onClick={() => setXemTruoc(xemTruoc === t.id ? null : t.id)}
                     >
                       <Eye size={ICON.md} />
@@ -291,7 +295,14 @@ export function EmailTemplateManager({ actorUid, onToast }: { actorUid: string; 
                       <Pencil size={ICON.md} />
                       {vi.common.edit}
                     </Button>
-                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => xoa(t)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      title={`Xoá mẫu ${t.name}`}
+                      aria-label={`Xoá mẫu ${t.name}`}
+                      onClick={() => xoa(t)}
+                    >
                       <Trash2 size={ICON.md} />
                     </Button>
                   </div>

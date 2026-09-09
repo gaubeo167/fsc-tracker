@@ -278,7 +278,18 @@ export function NotifyGroupManager({ actorUid, onToast }: { actorUid: string; on
                       <Pencil size={ICON.md} />
                       {vi.common.edit}
                     </Button>
-                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => xoa(g)}>
+                    {/* Chỉ có icon, nên PHẢI có tên: trình đọc màn hình đọc ra
+                        "button" trống, còn người nhìn thấy một thùng rác cạnh
+                        nút Sửa mà không biết nó xoá cái gì. Nút một chiều thì
+                        mơ hồ là đắt nhất. */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      title={`Xoá nhóm ${g.name}`}
+                      aria-label={`Xoá nhóm ${g.name}`}
+                      onClick={() => xoa(g)}
+                    >
                       <Trash2 size={ICON.md} />
                     </Button>
                   </div>
