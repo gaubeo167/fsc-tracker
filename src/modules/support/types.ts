@@ -13,6 +13,8 @@ export const COL = {
   campuses: 'support_campuses',
   roleAssignments: 'support_role_assignments',
   modules: 'support_modules',
+  /** Bản khai đơn vị công tác do chính người dùng mới điền. Xem SupportUnitClaim. */
+  unitClaims: 'support_unit_claims',
 } as const;
 
 /**
@@ -125,6 +127,29 @@ export interface SupportModuleConfig {
   backupOwnerUserId: string | null;
   projectId: string | null;
   isActive: boolean;
+}
+
+/**
+ * Bản khai đơn vị công tác, do CHÍNH người dùng điền lúc đăng nhập lần đầu.
+ *
+ * KHÔNG phải bảng phân quyền — SupportRoleAssignment mới là thứ quyết định người
+ * đó thuộc trường nào và đọc được dữ liệu của ai. Bản khai chỉ trả lời một câu
+ * hỏi: "bạn công tác ở đâu", để admin duyệt bằng một cú bấm thay vì phải tự đi
+ * dò từng người xem họ ở trường nào.
+ *
+ * Hai thứ tách rời nhau là CỐ Ý. Cho người dùng tự ghi thẳng vào bảng phân quyền
+ * nghĩa là ai cũng tự gán mình vào trường khác rồi đọc phiếu của trường đó —
+ * đúng thứ quy tắc cứng §3 cấm. Bản khai không mở thêm một quyền nào; nó chỉ là
+ * giá trị điền sẵn cho ô "Gán vào trường" ở hàng đợi duyệt.
+ */
+export interface SupportUnitClaim {
+  uid: string;
+  /** null = không thuộc trường nào (khối PTUD, phòng ban công ty). */
+  campusId: string | null;
+  /** Bộ phận / chức danh người dùng tự ghi. Rỗng nếu họ bỏ trống. */
+  jobTitle: string;
+  claimedAt?: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 /** Bản ghi gán quyền, doc id = uid của người dùng. */

@@ -43,11 +43,16 @@ const auth = getAuth();
 //   2 quản lý dự án   -> tiếp nhận phiếu của dự án mình, GÁN việc cho người khác
 //   3 nhân viên dự án -> tiếp nhận phiếu của dự án mình, CHỈ tự nhận việc
 //   4 giáo viên đầu mối campus -> chỉ gửi và theo dõi yêu cầu của trường mình
+//   5 người mới chưa duyệt -> thử luồng tự khai đơn vị công tác rồi chờ admin duyệt
 const USERS = [
   { uid: 'u-admin', email: 'vietnb4@fpt.edu.vn',      name: 'Nguyen Van Admin (Admin tong)',   role: 'admin',   status: 'active', supportRole: 'SYS_ADMIN',       campusId: null },
   { uid: 'u-pm',    email: 'quanly.duan@fpt.edu.vn',  name: 'Tran Quan Ly (QL du an)',         role: 'manager', status: 'active', supportRole: 'PTUD_MANAGER',    campusId: null },
   { uid: 'u-dev',   email: 'nhanvien.duan@fpt.edu.vn',name: 'Le Nhan Vien (NV du an)',         role: 'user',    status: 'active', supportRole: 'DEVELOPER',       campusId: null },
   { uid: 'u-gv',    email: 'giaovien.hn@fpt.edu.vn',  name: 'Pham Thi Giao Vien (HN01)',       role: 'user',    status: 'active', supportRole: 'CAMPUS_FOCAL',    campusId: 'HN01' },
+  // Chưa có bản ghi gán quyền và cũng chưa có bản khai đơn vị: đây đúng là thứ
+  // một người vừa đăng nhập lần đầu nhìn thấy. Không có tài khoản kiểu này thì
+  // màn tự khai đơn vị công tác không thử được bằng dữ liệu seed.
+  { uid: 'u-moi',   email: 'nguoimoi@fpt.edu.vn',     name: 'Do Nguoi Moi (Chua duyet)',       role: 'user',    status: 'pending', supportRole: null as string | null, campusId: null },
 ];
 
 const CAMPUSES = [
@@ -95,7 +100,8 @@ async function main() {
   // 'notifications' PHẢI có trong danh sách. Thông báo mang ticketId 't-1'…
   // 't-5'; lần chạy sau tạo lại đúng những id đó với nội dung khác, nên thông
   // báo cũ lặng lẽ bám sang phiếu mới và chỉ sang sai phiếu.
-  for (const c of ['users', 'support_campuses', 'support_role_assignments', 'support_tickets',
+  for (const c of ['users', 'support_campuses', 'support_role_assignments', 'support_unit_claims',
+                   'support_tickets',
                    'support_ticket_index', 'support_counters', 'support_ticket_numbers',
                    'support_modules', 'support_sla_policies', 'support_config', 'projects',
                    'notifications']) {

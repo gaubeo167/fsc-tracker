@@ -130,7 +130,7 @@ import { TaskImage } from './components/TaskImage';
 import {
   TaskImageError, newDraftId, removeTaskImage, uploadTaskImage,
 } from './services/taskImages';
-import { PendingGate } from './modules/support/components/PendingGate';
+import { OnboardingGate } from './modules/support/components/OnboardingGate';
 import { SupportAdminView } from './modules/support/components/admin/SupportAdminView';
 import { SupportView } from './modules/support/components/SupportView';
 import { PtudSupportView } from './modules/support/components/PtudSupportView';
@@ -5687,7 +5687,10 @@ function AuthConsumer({
   // Cả hai đều KHÔNG được vào ứng dụng. firestore.rules mới là chỗ chặn thật;
   // màn này chỉ để người dùng hiểu chuyện gì đang xảy ra thay vì thấy toàn màn trống.
   if (profile && (profile.status === 'pending' || profile.status === 'disabled')) {
-    return <PendingGate profile={profile} onSignOut={logout} />;
+    // OnboardingGate = màn chờ duyệt CỘNG bước tự khai đơn vị công tác.
+    // Người mới trả lời "bạn làm ở đâu" ngay tại đây, nên admin chỉ còn phải
+    // xác nhận thay vì tự đi dò từng tài khoản xem thuộc cơ sở nào.
+    return <OnboardingGate profile={profile} onSignOut={logout} onToast={showToast} />;
   }
 
   // Chờ biết vai trò hỗ trợ rồi mới dựng menu. Không chờ thì menu hiện đủ mục

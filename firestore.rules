@@ -334,12 +334,18 @@ service cloud.firestore {
     }
 
     // Danh sách trường.
-    // Đọc: mọi tài khoản ĐÃ DUYỆT. Tên trường không nhạy cảm, và client cần nó
-    // để hiển thị tên thay vì mã trong mọi màn hình.
+    // Đọc: mọi tài khoản ĐÃ ĐĂNG NHẬP, kể cả tài khoản chưa được duyệt.
+    //
+    // Trước đây đòi isApproved(). Nhưng người mới đăng nhập phải TỰ CHỌN ĐƯỢC
+    // đơn vị mình công tác ngay ở màn chờ duyệt, mà lúc đó họ chưa 'active' —
+    // đòi duyệt trước mới đọc được danh sách trường là một vòng luẩn quẩn: phải
+    // được duyệt mới khai được, mà admin thì chờ bản khai để biết duyệt vào đâu.
+    // Danh sách này chỉ có mã, tên, khu vực, địa chỉ cơ sở — không có thông tin
+    // cá nhân nào, và nó vốn đã in trên website tuyển sinh.
     // Ghi: chỉ admin. Trường là dữ liệu tham chiếu, người dùng tự thêm được là
     // hỏng toàn bộ mô hình phân quyền theo trường.
     match /support_campuses/{campusId} {
-      allow read: if isApproved();
+      allow read: if isAuthenticated();
       allow create, update: if isAdmin();
       // Không cho xoá: ticket lịch sử trỏ về campus, xoá là để lại tham chiếu
       // mồ côi. Tắt bằng isActive = false thay vì xoá.
@@ -385,6 +391,59 @@ service cloud.firestore {
                     );
       allow update: if isAdmin();
       allow delete: if isAdmin();
+    }
+
+    // Bản khai đơn vị công tác, do CHÍNH người dùng mới điền lúc đăng nhập lần đầu.
+    //
+    // ⚠️ Đây KHÔNG phải bảng phân quyền. support_role_assignments mới quyết định
+    // người đó thuộc trường nào và đọc được phiếu của ai; bản khai chỉ là câu trả
+    // lời cho "bạn công tác ở đâu" để admin duyệt bằng một cú bấm. Ghi được vào
+    // đây KHÔNG mở thêm một quyền nào — đừng bao giờ để rule nào đọc collection
+    // này ra để cấp quyền, nếu không nó lập tức thành đường tự gán mình vào
+    // trường khác, đúng thứ §3 cấm.
+    match /support_unit_claims/{uid} {
+      // Đọc: chính chủ (để hiện lại đơn vị đã khai ở màn chờ duyệt) và admin
+      // (hàng đợi duyệt tài khoản liệt kê cả collection để điền sẵn ô chọn trường).
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == uid);
+
+      // Ghi: chỉ cho chính mình, và CHỈ khi tài khoản còn đang chờ duyệt.
+      // Đã duyệt rồi thì bản gán mới là sự thật — sửa bản khai không đổi được gì
+      // mà lại làm màn duyệt của admin hiện thông tin mâu thuẫn với thực tế.
+      // Đã bị từ chối ('disabled') thì càng không: đó là quyết định có chủ đích
+      // của admin, không được phép lách bằng cách khai lại đơn vị khác.
+      allow create, update: if isAuthenticated()
+                              && request.auth.uid == uid
+                              && callerIsPendingUser()
+                              && unitClaimShapeOk(uid);
+
+      // Không cho người dùng tự xoá: bản khai là dấu vết của việc họ đã khai gì,
+      // và admin cần nó để đối chiếu khi duyệt.
+      allow delete: if isAdmin();
+    }
+
+    /** Tài khoản của người đang gọi còn ở trạng thái chờ duyệt. */
+    function callerIsPendingUser() {
+      let data = getUserData();
+      return data != null && data.get('status', '') == 'pending';
+    }
+
+    /**
+     * Bản khai đúng hình dạng.
+     *
+     * campusId phải là null (không thuộc trường nào) hoặc mã một trường CÓ THẬT.
+     * Không kiểm tồn tại thì bản khai chứa mã bịa ra, admin duyệt theo nó, và
+     * người đó nằm ở một trường không tồn tại — phiếu họ gửi không ai thấy.
+     */
+    function unitClaimShapeOk(uid) {
+      let d = request.resource.data;
+      let cid = d.get('campusId', null);
+      let job = d.get('jobTitle', '');
+      return d.keys().hasOnly(['uid', 'campusId', 'jobTitle', 'claimedAt', 'updatedAt'])
+        && d.get('uid', '') == uid
+        && (cid == null || (cid is string
+              && exists(/databases/$(database)/documents/support_campuses/$(cid))))
+        && job is string
+        && job.size() <= 100;
     }
 
     // Dữ liệu tham chiếu: 5 phân hệ, ma trận SLA, lịch làm việc, ngày lễ.

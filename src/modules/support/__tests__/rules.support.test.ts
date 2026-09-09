@@ -87,9 +87,24 @@ describe('support_campuses', () => {
     await assertSucceeds(getDoc(doc(db, 'support_campuses', 'HN01')));
   });
 
-  it('tài khoản CHỜ DUYỆT KHÔNG đọc được trường nào', async () => {
-    // Đây là điểm khác biệt so với collection `users` cũ (ai đăng nhập cũng đọc được).
+  it('tài khoản CHỜ DUYỆT cũng đọc được danh sách trường', async () => {
+    // ĐỔI CÓ CHỦ Ý (tính năng tự khai đơn vị công tác). Trước đây rule này đòi
+    // isApproved() và test ở đây khẳng định điều ngược lại.
+    //
+    // Vì sao đổi: người mới đăng nhập phải tự chọn được đơn vị mình công tác ở
+    // màn chờ duyệt, mà lúc đó họ chưa 'active'. Giữ nguyên là vòng luẩn quẩn —
+    // phải được duyệt mới khai được, mà admin thì chờ bản khai để biết duyệt vào
+    // đâu. Danh sách này chỉ có mã, tên, khu vực, địa chỉ cơ sở, không có thông
+    // tin cá nhân nào.
+    //
+    // Cái KHÔNG được nới theo là quyền ghi, và mọi dữ liệu phiếu — xem
+    // rules.unitClaim.test.ts và các khối bên dưới.
     const db = testEnv.authenticatedContext(PENDING).firestore();
+    await assertSucceeds(getDoc(doc(db, 'support_campuses', 'HN01')));
+  });
+
+  it('người CHƯA đăng nhập vẫn không đọc được trường nào', async () => {
+    const db = testEnv.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, 'support_campuses', 'HN01')));
   });
 

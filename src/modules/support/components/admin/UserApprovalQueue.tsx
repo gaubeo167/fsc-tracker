@@ -6,12 +6,14 @@ import type { UserProfile } from '../../../../types';
 import { vi } from '../../i18n/vi';
 import { watchCampuses, type RepoError } from '../../repository/campusRepository';
 import { approveUser, rejectUser, watchPendingUsers } from '../../repository/userAdminRepository';
+import { watchUnitClaims } from '../../repository/unitClaimRepository';
 import {
   DomainError,
   ROLES_REQUIRING_CAMPUS,
   SUPPORT_ROLES,
   type Campus,
   type SupportRole,
+  type SupportUnitClaim,
 } from '../../types';
 
 // ===========================================================================
@@ -20,6 +22,11 @@ import {
 // Mỗi dòng là một quyết định trọn vẹn: chọn vai trò, chọn trường, bấm duyệt.
 // Cố ý KHÔNG bắt admin mở modal rồi mới thao tác được — hàng đợi này sẽ có
 // hàng chục dòng mỗi đợt tuyển, mở/đóng modal từng cái là cực hình.
+//
+// Ô "Gán vào trường" được ĐIỀN SẴN theo bản khai của chính người dùng
+// (support_unit_claims, xem OnboardingGate). Admin vẫn là người quyết định:
+// giá trị điền sẵn sửa được, và VAI TRÒ thì không bao giờ điền sẵn — vai trò là
+// quyền, còn bản khai chỉ là lời người dùng nói về nơi mình làm việc.
 // ===========================================================================
 
 type Toast = (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -31,6 +38,7 @@ export function UserApprovalQueue({ actorUid, onToast }: { actorUid: string; onT
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [loadError, setLoadError] = useState<RepoError | null>(null);
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
+  const [claims, setClaims] = useState<Record<string, SupportUnitClaim>>({});
   const [busyUid, setBusyUid] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
 
@@ -49,14 +57,33 @@ export function UserApprovalQueue({ actorUid, onToast }: { actorUid: string; onT
       (rows) => setCampuses(rows.filter((c) => c.isActive)),
       () => setCampuses([])
     );
+    // Bản khai hỏng thì hàng đợi vẫn phải chạy y như trước: admin quay lại tự
+    // chọn trường như cũ, không phải thấy màn lỗi.
+    const stopClaims = watchUnitClaims(
+      (byUid) => setClaims(byUid),
+      () => setClaims({})
+    );
     return () => {
       stopUsers();
       stopCampuses();
+      stopClaims();
     };
   }, []);
 
+  /**
+   * Trường điền sẵn theo bản khai — chỉ khi trường đó CÒN TRONG danh sách đang
+   * hoạt động. Điền một mã đã tắt vào thẻ select thì ô hiện ra trống trơn mà
+   * bên trong lại có giá trị: admin bấm duyệt và người kia rơi vào một trường
+   * không còn nhận phiếu.
+   */
+  function campusFromClaim(uid: string): string {
+    const claimed = claims[uid]?.campusId;
+    if (!claimed) return '';
+    return campuses.some((c) => c.id === claimed) ? claimed : '';
+  }
+
   function draftOf(uid: string): RowDraft {
-    return drafts[uid] ?? { supportRole: 'CAMPUS_REPORTER', campusId: '' };
+    return drafts[uid] ?? { supportRole: 'CAMPUS_REPORTER', campusId: campusFromClaim(uid) };
   }
 
   function patchDraft(uid: string, patch: Partial<RowDraft>) {
@@ -154,6 +181,17 @@ export function UserApprovalQueue({ actorUid, onToast }: { actorUid: string; onT
                       <Badge variant="warning">Chờ duyệt</Badge>
                     </div>
 
+                    {/* Người này tự khai gì. Đây là thứ xoá bỏ bước admin phải
+                        đi hỏi từng người xem họ ở cơ sở nào. Hiện cả khi bản
+                        khai vô dụng (chưa khai, trường đã tắt) — im lặng thì
+                        admin không biết vì sao ô bên dưới lại trống. */}
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      <span className="font-semibold text-slate-600">
+                        {vi.approval.declaredUnit}:
+                      </span>{' '}
+                      {moTaBanKhai(claims[user.uid], campuses)}
+                    </p>
+
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">
                       <label className="block">
                         <span className="text-[11px] font-semibold text-slate-600">
@@ -230,4 +268,20 @@ export function UserApprovalQueue({ actorUid, onToast }: { actorUid: string; onT
       </Card>
     </div>
   );
+}
+
+/**
+ * Bản khai của một người, viết thành một dòng cho admin đọc lướt.
+ *
+ * Ba trường hợp phải phân biệt được, vì cách xử lý khác nhau: chưa khai (đi hỏi
+ * người đó), khai là không thuộc trường nào (chọn vai trò phía PTUD), và khai
+ * một trường không còn hoạt động (chọn lại giúp).
+ */
+function moTaBanKhai(claim: SupportUnitClaim | undefined, campuses: Campus[]): string {
+  if (!claim) return vi.approval.declaredNone;
+  const chucDanh = claim.jobTitle ? ` — ${claim.jobTitle}` : '';
+  if (claim.campusId === null) return vi.approval.declaredNoCampus + chucDanh;
+  const c = campuses.find((x) => x.id === claim.campusId);
+  if (!c) return `${claim.campusId} — ${vi.approval.declaredMissing}`;
+  return `${c.code} — ${c.name}${chucDanh}`;
 }

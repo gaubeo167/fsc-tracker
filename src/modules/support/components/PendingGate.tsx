@@ -21,9 +21,20 @@ import { vi } from '../i18n/vi';
 export function PendingGate({
   profile,
   onSignOut,
+  unitLine,
+  onEditUnit,
+  editLabel,
 }: {
   profile: UserProfile;
   onSignOut: () => void;
+  /**
+   * Đơn vị người dùng đã tự khai, viết sẵn thành một dòng đọc được.
+   * null = đã bỏ qua bước khai. undefined = màn này không dùng bản khai.
+   */
+  unitLine?: string | null;
+  /** Có mặt thì hiện đường quay lại sửa bản khai. */
+  onEditUnit?: () => void;
+  editLabel?: string;
 }) {
   const isRejected = profile.status === 'disabled';
 
@@ -58,6 +69,28 @@ export function PendingGate({
             </p>
             <p className="truncate text-xs text-slate-500">{profile.email}</p>
           </div>
+
+          {/* Đơn vị đã khai.
+              Đặt ngay dưới ô tài khoản vì đó là thứ người dùng vừa làm và là
+              thứ duy nhất họ còn sửa được trong lúc chờ. Khai nhầm trường mà
+              không sửa lại được thì phiếu của họ sau này đổ về trường khác. */}
+          {!isRejected && onEditUnit && (
+            <div className="mt-3 w-full rounded-lg bg-slate-50 px-4 py-3 text-left">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                {vi.unitClaim.declaredAs}
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-800">
+                {unitLine ?? <span className="text-slate-400">—</span>}
+              </p>
+              <button
+                type="button"
+                onClick={onEditUnit}
+                className="mt-1 text-xs font-medium text-indigo-600 hover:underline"
+              >
+                {editLabel ?? vi.unitClaim.change}
+              </button>
+            </div>
+          )}
 
           {!isRejected && (
             <div className="mt-5 w-full text-left">

@@ -53,12 +53,41 @@ export const vi = {
     approved: 'Đã duyệt',
     signedUpAt: 'Đăng nhập lần đầu',
     noCampusYet: 'Chưa có trường nào — tạo trường trước khi duyệt tài khoản',
+    declaredUnit: 'Người dùng tự khai',
+    declaredNoCampus: 'Không thuộc trường nào',
+    declaredNone: 'Chưa khai đơn vị — hỏi lại người này hoặc tự chọn giúp',
+    declaredMissing: 'Trường đã khai không còn trong danh sách — chọn lại giúp',
     errors: {
       campusRequired: 'Vai trò này bắt buộc phải chọn trường',
       roleRequired: 'Chưa chọn vai trò',
     },
     confirmReject: (name: string) =>
       `Từ chối tài khoản "${name}"? Người này sẽ không truy cập được hệ thống.`,
+  },
+
+  unitClaim: {
+    title: 'Bạn đang công tác ở đơn vị nào?',
+    subtitle:
+      'Chọn đơn vị của bạn để quản trị viên duyệt tài khoản. Mọi yêu cầu hỗ trợ bạn gửi sau này đều được ghi cho đơn vị này.',
+    search: 'Tìm theo tên, mã hoặc địa chỉ trường',
+    searchEmpty: 'Không có trường nào khớp',
+    noCampus: 'Không thuộc trường nào',
+    noCampusHint: 'Khối Phát triển ứng dụng, phòng ban công ty hoặc đơn vị khác',
+    jobTitle: 'Bộ phận / chức danh',
+    jobTitlePlaceholder: 'Ví dụ: Giáo viên Toán, Phòng CNTT',
+    jobTitleHint: 'Không bắt buộc. Giúp quản trị viên gán đúng vai trò cho bạn.',
+    submit: 'Gửi và chờ duyệt',
+    submitting: 'Đang gửi…',
+    saved: 'Đã gửi thông tin đơn vị. Quản trị viên sẽ duyệt tài khoản của bạn.',
+    skip: 'Bỏ qua, để quản trị viên chọn giúp',
+    change: 'Đổi đơn vị',
+    changeTitle: 'Chọn lại đơn vị công tác',
+    declaredAs: 'Đơn vị bạn đã khai',
+    unknownCampus: 'Trường không còn trong danh sách',
+    empty: 'Chưa có trường nào trong hệ thống',
+    emptyHint:
+      'Quản trị viên chưa tạo danh sách trường. Bỏ qua bước này cũng được, tài khoản của bạn vẫn nằm trong hàng đợi duyệt.',
+    loadFailed: 'Không tải được danh sách trường',
   },
 
   gate: {

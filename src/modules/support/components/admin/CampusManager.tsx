@@ -11,6 +11,7 @@ import {
   watchCampuses,
   type RepoError,
 } from '../../repository/campusRepository';
+import { filterCampuses } from '../../services/campusSearch';
 import { DomainError, type Campus } from '../../types';
 
 // ===========================================================================
@@ -26,13 +27,6 @@ type Toast = (message: string, type?: 'success' | 'error' | 'info') => void;
 /** Một lớp ô nhập cho khung sửa — cao bằng nhau, viền như nhau. */
 const O_NHAP =
   'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none';
-
-/** Bỏ dấu tiếng Việt để tìm kiếm khớp cả khi gõ không dấu. */
-function boDau(s: string): string {
-  return s.toLowerCase().normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd');
-}
 
 export function CampusManager({ actorUid, onToast }: { actorUid: string; onToast: Toast }) {
   const [rows, setRows] = useState<Campus[] | null>(null);
@@ -66,13 +60,7 @@ export function CampusManager({ actorUid, onToast }: { actorUid: string; onToast
 
   // Tìm không dấu, khớp cả mã, tên, địa chỉ, tỉnh. 18 cơ sở là đủ dài để phải
   // cuộn tìm, và địa chỉ mới là thứ người ta nhớ chứ không phải mã.
-  const shown = useMemo(() => {
-    const needle = boDau(q.trim());
-    if (!needle) return rows ?? [];
-    return (rows ?? []).filter((r) =>
-      boDau(`${r.code} ${r.name} ${r.address ?? ''} ${r.province ?? ''} ${r.region}`).includes(needle)
-    );
-  }, [rows, q]);
+  const shown = useMemo(() => filterCampuses(rows ?? [], q), [rows, q]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
