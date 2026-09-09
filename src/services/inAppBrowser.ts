@@ -54,3 +54,33 @@ export function nhanDienWebview(ua: string): WebviewInfo {
 
   return { laWebview: false, ten: '', laIOS };
 }
+
+// ===========================================================================
+// Ứng dụng chạy từ icon ngoài màn hình chính ("Thêm vào MH chính" trên iPhone).
+//
+// Đây KHÔNG phải webview của Zalo, và cách hỏng cũng khác:
+//   - Không có cửa sổ bật lên. iOS mở signInWithPopup thành một khung Safari
+//     rời, và khung đó có bộ nhớ tạm riêng, nên state đăng nhập mất khi quay về.
+//     Kết quả y hệt: trang trắng "missing initial state" của Firebase.
+//   - Icon trên màn hình chính có kho lưu trữ RIÊNG, tách khỏi Safari. Nghĩa là
+//     đăng nhập trong Safari KHÔNG làm icon đăng nhập theo. Bảo người dùng "mở
+//     bằng Safari" không giải quyết được gì cho cái icon họ vừa tạo.
+//
+// Nên chỗ này phải nhận ra riêng, để đổi sang luồng chuyển hướng thay vì bật
+// cửa sổ, và để câu hướng dẫn nói đúng chuyện đang xảy ra.
+// ===========================================================================
+
+/** Nguồn dữ liệu để test tiêm được, mặc định lấy từ window thật. */
+export interface MoiTruongChay {
+  standalone?: boolean;
+  displayModeStandalone?: boolean;
+}
+
+export function laUngDungManHinhChinh(mt?: MoiTruongChay): boolean {
+  if (mt) return mt.standalone === true || mt.displayModeStandalone === true;
+  if (typeof window === 'undefined') return false;
+  // navigator.standalone là cờ RIÊNG của Safari trên iOS, không có ở nơi khác.
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  if (nav.standalone === true) return true;
+  return window.matchMedia?.('(display-mode: standalone)')?.matches === true;
+}

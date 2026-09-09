@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nhanDienWebview } from '../inAppBrowser';
+import { laUngDungManHinhChinh, nhanDienWebview } from '../inAppBrowser';
 
 // User-Agent thật, chép từ máy thật. Đoán mò chuỗi UA là cách chắc chắn nhất để
 // viết ra một bộ nhận diện chạy đúng trong test và sai ngoài đời.
@@ -60,5 +60,19 @@ describe('nhanDienWebview — KHÔNG bắt nhầm trình duyệt thật', () => 
 
   it('chuỗi rỗng thì coi như trình duyệt thường', () => {
     expect(nhanDienWebview('').laWebview).toBe(false);
+  });
+});
+
+describe('laUngDungManHinhChinh', () => {
+  it('iPhone thêm vào màn hình chính: navigator.standalone = true', () => {
+    expect(laUngDungManHinhChinh({ standalone: true })).toBe(true);
+  });
+
+  it('Android/máy tính cài như ứng dụng: display-mode standalone', () => {
+    expect(laUngDungManHinhChinh({ displayModeStandalone: true })).toBe(true);
+  });
+
+  it('mở trong tab trình duyệt bình thường thì không', () => {
+    expect(laUngDungManHinhChinh({ standalone: false, displayModeStandalone: false })).toBe(false);
   });
 });

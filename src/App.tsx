@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback, createContext, useContext, Component } from 'react';
 import { 
+  getRedirectResult,
   onAuthStateChanged, 
   signInWithPopup, 
+  signInWithRedirect,
   signOut, 
   User as FirebaseUser 
 } from 'firebase/auth';
@@ -131,7 +133,7 @@ import {
   TaskImageError, newDraftId, removeTaskImage, uploadTaskImage,
 } from './services/taskImages';
 import { OnboardingGate } from './modules/support/components/OnboardingGate';
-import { nhanDienWebview } from './services/inAppBrowser';
+import { laUngDungManHinhChinh, nhanDienWebview } from './services/inAppBrowser';
 import { SupportAdminView } from './modules/support/components/admin/SupportAdminView';
 import { SupportView } from './modules/support/components/SupportView';
 import { PtudSupportView } from './modules/support/components/PtudSupportView';
@@ -449,6 +451,18 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     return unsubscribe;
   }, [napHoSo]);
 
+  // Lượt quay về sau khi đăng nhập bằng chuyển hướng.
+  //
+  // onAuthStateChanged tự bắn khi thành công, nên chỗ này CHỈ để lấy lỗi. Không
+  // có nó thì một lượt chuyển hướng hỏng kết thúc bằng màn đăng nhập y như cũ,
+  // không một dòng giải thích, và người dùng bấm lại mãi.
+  useEffect(() => {
+    getRedirectResult(auth).catch((err: any) => {
+      console.error('AuthProvider: redirect sign-in error:', err);
+      setError(`Đăng nhập không hoàn tất (${err?.code ?? 'lỗi không rõ'}). Thử mở bằng Safari hoặc Chrome.`);
+    });
+  }, []);
+
   /** Thử tải lại hồ sơ cho tài khoản đang đăng nhập. */
   const retryProfile = useCallback(async () => {
     setLoading(true);
@@ -458,6 +472,15 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async () => {
     try {
       setError(null);
+      // Chạy từ icon ngoài màn hình chính thì KHÔNG có cửa sổ bật lên. iOS biến
+      // signInWithPopup thành một khung Safari rời có bộ nhớ tạm riêng, nên state
+      // đăng nhập mất khi quay về và người dùng nhận đúng trang trắng
+      // "missing initial state" của Firebase. Luồng chuyển hướng đi và về trong
+      // cùng một cửa sổ nên không vấp chỗ đó.
+      if (laUngDungManHinhChinh()) {
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      }
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
       console.error('AuthProvider: Sign in error:', err);
@@ -5559,6 +5582,7 @@ function AuthConsumer({
     () => nhanDienWebview(typeof navigator === 'undefined' ? '' : navigator.userAgent),
     []
   );
+  const manHinhChinh = useMemo(() => laUngDungManHinhChinh(), []);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   /**
    * Thanh menu trái đang thu gọn thành dải icon hay không. CHỈ áp cho desktop —
@@ -5685,20 +5709,36 @@ function AuthConsumer({
             Người dùng chỉ thấy một trang trắng của Firebase với dòng tiếng Anh
             "missing initial state" — trang đó của Firebase, ta không sửa được
             chữ nào trên đó. Nên phải chặn TRƯỚC, ngay tại đây. */}
-        {webview.laWebview && (
+        {(webview.laWebview || manHinhChinh) && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-left">
             <p className="flex items-center gap-2 text-sm font-bold text-amber-900">
-              <AlertCircle size={16} /> Hãy mở bằng trình duyệt
+              <AlertCircle size={16} />
+              {manHinhChinh ? 'Đang mở từ icon màn hình chính' : 'Hãy mở bằng trình duyệt'}
             </p>
-            <p className="mt-2 text-xs leading-relaxed text-amber-800">
-              Bạn đang mở trang này bên trong ứng dụng {webview.ten || 'khác'}. Đăng nhập Google
-              không chạy được ở đây, vì ứng dụng đó chặn bộ nhớ tạm mà Google cần để xác thực.
-            </p>
-            <p className="mt-2 text-xs font-semibold text-amber-900">
-              {webview.laIOS
-                ? 'Bấm biểu tượng chia sẻ hoặc la bàn ở thanh dưới, chọn "Mở trong Safari".'
-                : 'Bấm dấu ba chấm ở góc trên, chọn "Mở bằng trình duyệt".'}
-            </p>
+            {/* Hai tình huống khác hẳn nhau, nên nói khác nhau.
+                Icon màn hình chính: ta ĐÃ đổi sang luồng chuyển hướng nên nhiều
+                khả năng đăng nhập chạy được, chỉ cần dặn trước đường lui — vì
+                nếu hỏng thì họ dừng lại ở trang trắng CỦA FIREBASE, nơi app này
+                không chen được một chữ nào vào.
+                Webview Zalo/Facebook: chắc chắn hỏng, nên nói thẳng. */}
+            {manHinhChinh ? (
+              <p className="mt-2 text-xs leading-relaxed text-amber-800">
+                Đăng nhập sẽ chuyển sang Google rồi tự quay lại đây. Nếu bạn gặp một trang trắng
+                báo lỗi tiếng Anh, hãy sao chép liên kết và mở bằng Safari.
+              </p>
+            ) : (
+              <p className="mt-2 text-xs leading-relaxed text-amber-800">
+                Bạn đang mở trang này bên trong ứng dụng {webview.ten || 'khác'}. Đăng nhập Google
+                không chạy được ở đây, vì ứng dụng đó chặn bộ nhớ tạm mà Google cần để xác thực.
+              </p>
+            )}
+            {!manHinhChinh && (
+              <p className="mt-2 text-xs font-semibold text-amber-900">
+                {webview.laIOS
+                  ? 'Bấm biểu tượng chia sẻ hoặc la bàn ở thanh dưới, chọn "Mở trong Safari".'
+                  : 'Bấm dấu ba chấm ở góc trên, chọn "Mở bằng trình duyệt".'}
+              </p>
+            )}
             <button
               onClick={() => {
                 void navigator.clipboard?.writeText(window.location.href);
