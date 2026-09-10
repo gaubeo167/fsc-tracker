@@ -208,17 +208,39 @@ service cloud.firestore {
             get(/databases/$(database)/documents/projects/$(projectId)).data.get('managers', []);
         }
         
+        /**
+         * Lượt ghi này có đụng vào 'status' không.
+         *
+         * ⚠️ Hai danh sách trạng thái ở dưới CHỈ được áp khi câu trả lời là CÓ.
+         *
+         * Trước đây chúng kiểm request.resource.data.status — trạng thái của
+         * document SAU khi ghi — kể cả với lượt ghi không hề đổi trạng thái. Hậu
+         * quả gặp thật: task đã nghiệm thu ('done') thì người thực hiện không
+         * bình luận thêm được một chữ, không tích được checklist, không đính kèm
+         * được ảnh; task đang chờ nghiệm thu ('review') thì chính người nghiệm
+         * thu cũng không bình luận nổi, vì 'review' không có trong danh sách của
+         * nhánh reviewer. Tất cả hiện ra thành "Bạn không có quyền thực hiện
+         * thao tác này" trong khi người dùng chỉ gõ một dòng bình luận.
+         *
+         * Ý định thật của hai danh sách đó là hạn chế NHỮNG GIÁ TRỊ TRẠNG THÁI
+         * ĐƯỢC PHÉP ĐẶT, không phải khoá quyền ghi theo trạng thái task đang
+         * đứng. Người thực hiện vẫn không tự đặt 'done' cho mình được.
+         */
+        function doiTrangThai() {
+          return request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']);
+        }
+
         allow update: if isAdmin() || isDirector() || isManager(projectId) || (
           isTaskAssignee(resource.data) && 
           // Allow updating these fields
           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['progress', 'subtasks', 'comments', 'attachedImages', 'status'])) &&
           // User can only update status to 'todo', 'in-progress' or 'review' based on progress
-          (request.resource.data.status in ['todo', 'in-progress', 'review'])
+          (!doiTrangThai() || request.resource.data.status in ['todo', 'in-progress', 'review'])
         ) || (
           isTaskReviewer(resource.data) && 
           // Reviewer can approve/reject and add comments
           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'comments', 'progress'])) &&
-          (request.resource.data.status in ['todo', 'done', 'rejected', 'in-progress'])
+          (!doiTrangThai() || request.resource.data.status in ['todo', 'done', 'rejected', 'in-progress'])
         );
 
         allow delete: if isAdmin() || isManager(projectId);

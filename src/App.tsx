@@ -137,6 +137,7 @@ import {
 } from './services/taskImages';
 import { OnboardingGate } from './modules/support/components/OnboardingGate';
 import { chuanHoaTrangThai, trangThaiTheoTienDo } from './services/taskStatus';
+import { laQuanLyDuAn } from './services/taskPermissions';
 import { laUngDungManHinhChinh, nhanDienWebview } from './services/inAppBrowser';
 import { SupportAdminView } from './modules/support/components/admin/SupportAdminView';
 import { SupportView } from './modules/support/components/SupportView';
@@ -1363,7 +1364,9 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     }
   }, [editedTask.startDate, editedTask.estimatedDuration]);
 
-  const isManager = (profile?.role === 'manager' || profile?.role === 'admin' || projectManagers.includes(profile?.uid || '')) && profile?.role !== 'director';
+  // Quản lý của CHÍNH dự án này, không phải "ai mang vai trò manager".
+  // Lý do đầy đủ nằm trong services/taskPermissions.ts.
+  const isManager = laQuanLyDuAn(profile, projectManagers);
   const isAdmin = profile?.role === 'admin';
   const isAssignee = editedTask.assignees?.includes(profile?.uid || '') || false;
 
