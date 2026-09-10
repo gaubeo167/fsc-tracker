@@ -75,7 +75,7 @@ const TICKETS = [
     title: 'Xuất báo cáo học phí ra Excel bị sai định dạng ngày',
     desc: 'Cột ngày đóng học phí hiện thành số thay vì ngày tháng.',
     status: 'ACCEPTED', scope: 'CAMPUS_LOCAL', priority: 'P3',
-    task: { projectId: 'p-web-fsb', assignee: 'u-dev', progress: 0, status: 'todo' } },
+    task: { projectId: 'p-web-fsb', assignee: 'u-dev', progress: 0, status: 'in-progress' } },
   { no: 'FSC-APP_MY_FPT_SCHOOL-2608-0001', module: 'APP_MY_FPT_SCHOOL', campus: 'HN01', reporter: 'u-gv',
     title: 'App phụ huynh không nhận được thông báo điểm',
     desc: 'Phu huynh phan anh khong nhan duoc thong bao khi giao vien nhap diem.',

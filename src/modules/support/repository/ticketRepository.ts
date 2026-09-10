@@ -787,9 +787,13 @@ export async function acceptTicket(
       description,
       category: ticket.type === 'BUG' ? 'Sửa lỗi' : 'Tính năng mới',
       priority: taskPriority,
-      // 'todo' chứ không phải 'pending': phiếu đã được đầu mối duyệt rồi, không
-      // cần thêm một vòng duyệt nữa ở module Công việc.
-      status: 'todo',
+      // 'in-progress' chứ không phải 'pending': phiếu đã được đầu mối duyệt
+      // rồi, không cần thêm một vòng duyệt nữa ở module Công việc.
+      //
+      // Cũng không phải 'todo' ("Sẵn sàng") nữa — trạng thái đó đã bị bỏ khỏi
+      // vòng đời công việc. Tiếp nhận phiếu LÀ nhận việc, nên task sinh ra đã
+      // đang làm; từ đây chỉ còn cập nhật tiến độ cho tới khi xong hoặc quá hạn.
+      status: 'in-progress',
       progress: 0,
       // Chưa chốt hạn thì để RỖNG, không bịa một ngày.
       //

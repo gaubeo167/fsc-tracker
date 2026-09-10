@@ -1,6 +1,16 @@
 import { Timestamp } from 'firebase/firestore';
 
 export type ProjectStatus = 'active' | 'hidden';
+/**
+ * Trạng thái công việc.
+ *
+ * 'todo' ("Sẵn sàng") ĐÃ BỎ khỏi vòng đời: giao việc là bắt đầu làm, không còn
+ * bước chờ ở giữa. Ứng dụng KHÔNG bao giờ ghi giá trị này nữa, nhưng nó vẫn
+ * nằm trong union vì task tạo trước thay đổi này còn mang nó trong Firestore.
+ * normalizeTask() ở App.tsx quy đổi 'todo' -> 'in-progress' ngay lúc đọc.
+ *
+ * 'overdue' KHÔNG được lưu: nó suy ra từ hạn chót (isTaskOverdue).
+ */
 export type TaskStatus = 'pending' | 'todo' | 'in-progress' | 'review' | 'rejected' | 'done' | 'overdue';
 export type UserRole = 'admin' | 'director' | 'manager' | 'user';
 export type Priority = 'low' | 'medium' | 'high' | 'critical';

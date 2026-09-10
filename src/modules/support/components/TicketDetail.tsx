@@ -576,7 +576,9 @@ export function TicketDetail({
 /** Ánh xạ trạng thái task của module Công việc sang chữ người dùng cuối hiểu. */
 const TASK_STATUS_VI: Record<string, string> = {
   pending: 'Chờ duyệt',
-  todo: 'Đã tiếp nhận, chờ xử lý',
+  // 'todo' chỉ còn xuất hiện ở task tạo trước khi bỏ trạng thái "Sẵn sàng".
+  // Giữ lại một dòng để phiếu cũ không hiện ra mã trạng thái thô.
+  todo: 'Đang xử lý',
   'in-progress': 'Đang xử lý',
   review: 'Chờ nghiệm thu',
   done: 'Đã hoàn thành',

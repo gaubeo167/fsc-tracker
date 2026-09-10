@@ -27,12 +27,16 @@ interface SupportTask {
   tags: string[];
 }
 
+// 'todo' ("Sẵn sàng") đã bị bỏ khỏi vòng đời công việc. Task cũ vẫn mang giá trị
+// đó trong Firestore, và màn này đọc thẳng document chứ không đi qua
+// normalizeTask của App.tsx — nên phải tự quy đổi, nếu không việc cũ hiện ra một
+// nhãn không còn tồn tại ở bất kỳ màn nào khác.
 const STATUS_VI: Record<string, string> = {
-  pending: 'Chờ duyệt', todo: 'Chờ xử lý', 'in-progress': 'Đang làm',
+  pending: 'Chờ duyệt', todo: 'Đang làm', 'in-progress': 'Đang làm',
   review: 'Chờ nghiệm thu', done: 'Hoàn thành', rejected: 'Bị từ chối',
 };
 const STATUS_VARIANT: Record<string, 'neutral' | 'warning' | 'info' | 'success' | 'danger' | 'sky'> = {
-  pending: 'warning', todo: 'neutral', 'in-progress': 'info',
+  pending: 'warning', todo: 'info', 'in-progress': 'info',
   review: 'sky', done: 'success', rejected: 'danger',
 };
 

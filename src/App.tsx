@@ -126,6 +126,9 @@ function normalizeTask(raw: any): Task {
     cc: raw?.cc ?? [],
     tags: raw?.tags ?? [],
     progress: raw?.progress ?? 0,
+    // Quy đổi ở ĐÂY vì đây là cửa duy nhất dữ liệu đi từ Firestore vào React.
+    // Lý do đầy đủ nằm trong services/taskStatus.ts.
+    status: chuanHoaTrangThai(raw?.status),
   } as Task;
 }
 import { TaskImage } from './components/TaskImage';
@@ -133,6 +136,7 @@ import {
   TaskImageError, newDraftId, removeTaskImage, uploadTaskImage,
 } from './services/taskImages';
 import { OnboardingGate } from './modules/support/components/OnboardingGate';
+import { chuanHoaTrangThai, trangThaiTheoTienDo } from './services/taskStatus';
 import { laUngDungManHinhChinh, nhanDienWebview } from './services/inAppBrowser';
 import { SupportAdminView } from './modules/support/components/admin/SupportAdminView';
 import { SupportView } from './modules/support/components/SupportView';
@@ -183,7 +187,6 @@ import {
  */
 const MAU_TRANG_THAI = {
   pending:       '#ff9500', // cam  — khớp Badge "warning"
-  todo:          '#86868b', // xám  — khớp Badge "neutral"
   'in-progress': '#0066cc', // lam  — khớp Badge "info"
   overdue:       '#ff3b30', // đỏ   — thứ đang cháy
   review:        '#32ade6', // xanh biển — khớp Badge "sky"
@@ -685,13 +688,7 @@ const TaskCard: React.FC<{
     const progress = parseInt(e.target.value);
     let newStatus = task.status;
     
-    if (progress === 0) {
-      newStatus = 'todo';
-    } else if (progress > 0 && progress < 100) {
-      newStatus = 'in-progress';
-    } else if (progress === 100) {
-      newStatus = 'review';
-    }
+    newStatus = trangThaiTheoTienDo(progress);
     
     try {
       if (!task.projectId) throw new Error('Missing projectId');
@@ -749,7 +746,6 @@ const TaskCard: React.FC<{
           }>
             {isTaskOverdue(task) ? 'QUÁ HẠN' :
              task.status === 'pending' ? 'CHỜ DUYỆT' :
-             task.status === 'todo' ? 'SẴN SÀNG' :
              task.status === 'in-progress' ? 'ĐANG LÀM' :
              task.status === 'review' ? 'CHỜ NGHIỆM THU' :
              task.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
@@ -777,7 +773,7 @@ const TaskCard: React.FC<{
         </div>
       </div>
       
-      {(task.subtasks.length > 0 || !(isAssignee && (task.status === 'todo' || task.status === 'in-progress' || task.status === 'rejected'))) && (
+      {(task.subtasks.length > 0 || !(isAssignee && (task.status === 'in-progress' || task.status === 'rejected'))) && (
         <div className="space-y-1">
           <div className="flex justify-between text-[10px] text-slate-500">
             <span>{task.subtasks.length > 0 ? 'Checklist' : 'Tiến độ'}</span>
@@ -816,7 +812,7 @@ const TaskCard: React.FC<{
         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
           {task.status === 'pending' && isReviewer && onUpdateStatus && (
             <button 
-              onClick={() => setShowActionCommentModal({ status: 'todo', title: 'Phê duyệt công việc', variant: 'success' })}
+              onClick={() => setShowActionCommentModal({ status: 'in-progress', title: 'Phê duyệt công việc', variant: 'success' })}
               className="p-1.5 bg-sky-50 text-sky-600 rounded-lg hover:bg-sky-100 transition-colors"
               title="Duyệt cho phép làm"
             >
@@ -845,7 +841,7 @@ const TaskCard: React.FC<{
         </div>
       </div>
 
-      {isAssignee && (task.status === 'todo' || task.status === 'in-progress' || task.status === 'rejected') && task.subtasks.length === 0 && (
+      {isAssignee && (task.status === 'in-progress' || task.status === 'rejected') && task.subtasks.length === 0 && (
         <div className="pt-2">
           <input 
             type="range" 
@@ -920,7 +916,6 @@ const TaskListItem: React.FC<{
       <div className={cn("w-2 h-10 rounded-full", 
         isTaskOverdue(task) ? "bg-red-500" :
         task.status === 'pending' ? "bg-amber-400" :
-        task.status === 'todo' ? "bg-slate-300" : 
         task.status === 'in-progress' ? "bg-blue-500" : 
         task.status === 'review' ? "bg-sky-400" : 
         task.status === 'rejected' ? "bg-red-500" : "bg-emerald-500"
@@ -946,7 +941,6 @@ const TaskListItem: React.FC<{
           }>
             {isTaskOverdue(task) ? 'QUÁ HẠN' :
              task.status === 'pending' ? 'CHỜ DUYỆT' :
-             task.status === 'todo' ? 'SẴN SÀNG' :
              task.status === 'in-progress' ? 'ĐANG LÀM' :
              task.status === 'review' ? 'CHỜ NGHIỆM THU' :
              task.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
@@ -1005,7 +999,7 @@ const TaskListItem: React.FC<{
 
       <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
         {task.status === 'pending' && isReviewer && onUpdateStatus && (
-          <Button variant="secondary" className="h-8 px-3 text-xs" onClick={() => setShowActionCommentModal({ status: 'todo', title: 'Phê duyệt công việc', variant: 'success' })}>
+          <Button variant="secondary" className="h-8 px-3 text-xs" onClick={() => setShowActionCommentModal({ status: 'in-progress', title: 'Phê duyệt công việc', variant: 'success' })}>
             DUYỆT
           </Button>
         )}
@@ -1128,8 +1122,7 @@ const TaskTable: React.FC<{
                   task.status === 'pending' ? 'warning' : 'neutral'
                 }>
                   {task.status === 'pending' ? 'CHỜ DUYỆT' :
-                   task.status === 'todo' ? 'SẴN SÀNG' :
-                   task.status === 'in-progress' ? 'ĐANG LÀM' :
+                         task.status === 'in-progress' ? 'ĐANG LÀM' :
                    task.status === 'review' ? 'CHỜ NGHIỆM THU' :
                    task.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
                 </Badge>
@@ -1338,7 +1331,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     tags: task.tags || [],
     attachedImages: task.attachedImages || [],
     progress: task.progress || 0,
-    status: task.status || 'todo',
+    status: task.status || 'in-progress',
     startDate: task.startDate || '',
     estimatedDuration: task.estimatedDuration || 0,
     estimatedDeadline: task.estimatedDeadline || '',
@@ -1441,7 +1434,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         tags: editedTask.tags || [],
         attachedImages: editedTask.attachedImages || [],
         progress: editedTask.progress || 0,
-        status: editedTask.status || 'todo',
+        status: editedTask.status || 'in-progress',
         startDate: editedTask.startDate || '',
         estimatedDuration: editedTask.estimatedDuration || 0,
         estimatedDeadline: editedTask.estimatedDeadline || '',
@@ -1720,12 +1713,12 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
       }
 
       let updatedComments = editedTask.comments;
-      const baseCommentText = actionComment || newComment.trim() || (newStatus === 'rejected' ? 'Từ chối công việc' : newStatus === 'todo' ? 'Đã duyệt công việc' : 'Đã nghiệm thu công việc');
+      const baseCommentText = actionComment || newComment.trim() || (newStatus === 'rejected' ? 'Từ chối công việc' : newStatus === 'in-progress' ? 'Đã duyệt công việc' : 'Đã nghiệm thu công việc');
       
       let finalCommentText = baseCommentText;
       if (newStatus === 'done') {
         finalCommentText = `[ĐÃ NGHIỆM THU] ${baseCommentText}`;
-      } else if (newStatus === 'todo' && task.status === 'pending') {
+      } else if (newStatus === 'in-progress' && task.status === 'pending') {
         finalCommentText = `[ĐÃ DUYỆT] ${baseCommentText}`;
       } else if (newStatus === 'rejected') {
         finalCommentText = `[BỊ TỪ CHỐI] ${baseCommentText}`;
@@ -1782,7 +1775,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
           message = `Công việc "${task.title}" bị từ chối: ${finalCommentText}`;
         } else if (newStatus === 'done') {
           message = `Công việc "${task.title}" đã được nghiệm thu hoàn thành`;
-        } else if (newStatus === 'todo' && task.status === 'pending') {
+        } else if (newStatus === 'in-progress' && task.status === 'pending') {
           message = `Công việc "${task.title}" đã được phê duyệt`;
         } else {
           message = `Công việc "${task.title}" đã chuyển sang trạng thái: ${newStatus}`;
@@ -1841,11 +1834,10 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
               editedTask.status === 'done' ? 'success' :
               editedTask.status === 'rejected' ? 'danger' :
               editedTask.status === 'in-progress' ? 'warning' : 
-              editedTask.status === 'todo' ? 'info' : 'neutral'
+              'neutral'
             }>
               {isTaskOverdue(editedTask as Task) ? 'QUÁ HẠN' :
                editedTask.status === 'pending' ? 'CHỜ DUYỆT' :
-               editedTask.status === 'todo' ? 'SẴN SÀNG' :
                editedTask.status === 'in-progress' ? 'ĐANG LÀM' :
                editedTask.status === 'review' ? 'CHỜ NGHIỆM THU' :
                editedTask.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
@@ -1923,13 +1915,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                       }
                       const progress = parseInt(e.target.value);
                       let newStatus = editedTask.status;
-                      if (progress === 0) {
-                        newStatus = 'todo';
-                      } else if (progress > 0 && progress < 100) {
-                        newStatus = 'in-progress';
-                      } else if (progress === 100) {
-                        newStatus = 'review';
-                      }
+                      newStatus = trangThaiTheoTienDo(progress);
                       setEditedTask({ ...editedTask, progress, status: newStatus });
                       
                       try {
@@ -2398,14 +2384,13 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                             const newStatus = e.target.value as TaskStatus;
                             let newProgress = editedTask.progress;
                             if (newStatus === 'done') newProgress = 100;
-                            else if (newStatus === 'todo' && editedTask.status === 'pending') newProgress = 0;
+                            else if (newStatus === 'in-progress' && editedTask.status === 'pending') newProgress = 0;
                             else if (newStatus === 'rejected' && editedTask.status === 'review') newProgress = 90;
                             setEditedTask({ ...editedTask, status: newStatus, progress: newProgress });
                           }}
                           className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
                         >
                           <option value="pending">Chờ duyệt</option>
-                          <option value="todo">Sẵn sàng</option>
                           <option value="in-progress">Đang làm</option>
                           <option value="review">Chờ nghiệm thu</option>
                           <option value="rejected">Bị từ chối</option>
@@ -2542,7 +2527,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
             {editedTask.status === 'pending' && (isAdmin || isManager) && (
               <>
                 <Button variant="danger" onClick={() => setShowActionCommentModal({ status: 'rejected', title: 'Từ chối công việc', variant: 'danger' })} disabled={loading}>Từ chối</Button>
-                <Button variant="success" onClick={() => setShowActionCommentModal({ status: 'todo', title: 'Phê duyệt công việc', variant: 'success' })} disabled={loading}>Duyệt công việc</Button>
+                <Button variant="success" onClick={() => setShowActionCommentModal({ status: 'in-progress', title: 'Phê duyệt công việc', variant: 'success' })} disabled={loading}>Duyệt công việc</Button>
               </>
             )}
             {editedTask.status === 'review' && (isAdmin || isManager || (editedTask.reviewers?.includes(profile?.uid || '') && profile?.role !== 'director')) && (
@@ -2766,7 +2751,6 @@ const Dashboard = ({
     totalProjects: filteredProjects.length,
     totalTasks: dashboardTasks.length,
     pending: dashboardTasks.filter(t => t.status === 'pending').length,
-    todo: dashboardTasks.filter(t => t.status === 'todo').length,
     inProgress: dashboardTasks.filter(t => t.status === 'in-progress').length,
     review: dashboardTasks.filter(t => t.status === 'review').length,
     rejected: dashboardTasks.filter(t => t.status === 'rejected').length,
@@ -3220,8 +3204,7 @@ const Dashboard = ({
                             task.status === 'pending' ? 'warning' : 'neutral'
                           }>
                             {task.status === 'pending' ? 'CHỜ DUYỆT' :
-                             task.status === 'todo' ? 'SẴN SÀNG' :
-                             task.status === 'in-progress' ? 'ĐANG LÀM' :
+                                             task.status === 'in-progress' ? 'ĐANG LÀM' :
                              task.status === 'review' ? 'CHỜ NGHIỆM THU' :
                              task.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
                           </Badge>
@@ -3548,7 +3531,7 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
         updates.progress = 90;
       } else if (newStatus === 'done') {
         updates.progress = 100;
-      } else if (newStatus === 'todo' && task.status === 'pending') {
+      } else if (newStatus === 'in-progress' && task.status === 'pending') {
         updates.progress = 0;
       }
 
@@ -3575,7 +3558,7 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
             message = `Công việc "${task.title}" bị từ chối: ${commentText || ''}`;
           } else if (newStatus === 'done') {
             message = `Công việc "${task.title}" đã được nghiệm thu hoàn thành`;
-          } else if (newStatus === 'todo' && task.status === 'pending') {
+          } else if (newStatus === 'in-progress' && task.status === 'pending') {
             message = `Công việc "${task.title}" đã được phê duyệt`;
           } else if (newStatus === 'review') {
             message = `Công việc "${task.title}" đang chờ bạn nghiệm thu`;
@@ -4427,7 +4410,6 @@ const ReportsView = () => {
       
       const data = [
         { name: 'Chờ duyệt', value: statusCounts.pending || 0, color: MAU_TRANG_THAI.pending },
-        { name: 'Sẵn sàng', value: statusCounts.todo || 0, color: MAU_TRANG_THAI.todo },
         { name: 'Đang làm', value: statusCounts['in-progress'] || 0, color: MAU_TRANG_THAI['in-progress'] },
         { name: 'Quá hạn', value: overdueCount, color: MAU_TRANG_THAI.overdue },
         { name: 'Chờ nghiệm thu', value: statusCounts.review || 0, color: MAU_TRANG_THAI.review },
@@ -4930,7 +4912,6 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
 
   const stats = [
     { name: 'Pending', value: tasks.filter(t => t.status === 'pending').length, color: MAU_TRANG_THAI.pending },
-    { name: 'Todo', value: tasks.filter(t => t.status === 'todo').length, color: MAU_TRANG_THAI.todo },
     { name: 'In Progress', value: tasks.filter(t => t.status === 'in-progress').length, color: MAU_TRANG_THAI['in-progress'] },
     { name: 'Overdue', value: tasks.filter(t => isTaskOverdue(t)).length, color: MAU_TRANG_THAI.overdue },
     { name: 'Review', value: tasks.filter(t => t.status === 'review').length, color: MAU_TRANG_THAI.review },
@@ -4999,7 +4980,7 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
       }
     } else if (newStatus === 'done') {
       updates.progress = 100;
-    } else if (newStatus === 'todo' && task.status === 'pending') {
+    } else if (newStatus === 'in-progress' && task.status === 'pending') {
       // Approved from pending
       updates.progress = 0;
     }
@@ -5034,7 +5015,7 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
           message = `Công việc "${task.title}" bị từ chối: ${commentText || ''}`;
         } else if (newStatus === 'done') {
           message = `Công việc "${task.title}" đã được nghiệm thu hoàn thành`;
-        } else if (newStatus === 'todo' && task.status === 'pending') {
+        } else if (newStatus === 'in-progress' && task.status === 'pending') {
           message = `Công việc "${task.title}" đã được phê duyệt`;
         } else if (newStatus === 'review') {
           message = `Công việc "${task.title}" đang chờ bạn nghiệm thu`;
@@ -5195,7 +5176,7 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
-          {(['all', 'waiting', 'pending', 'todo', 'in-progress', 'overdue', 'review', 'rejected', 'done', 'reports', 'reviews'] as const).map((tab) => (
+          {(['all', 'waiting', 'pending', 'in-progress', 'overdue', 'review', 'rejected', 'done', 'reports', 'reviews'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -5207,7 +5188,6 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
               {tab === 'all' ? 'Tất cả' : 
                tab === 'waiting' ? 'Danh sách chờ' :
                tab === 'pending' ? 'Chờ duyệt' :
-               tab === 'todo' ? 'Sẵn sàng' :
                tab === 'in-progress' ? 'Đang làm' :
                tab === 'overdue' ? 'Quá hạn' :
                tab === 'review' ? 'Chờ nghiệm thu' :
@@ -5263,20 +5243,18 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
               exit={{ opacity: 0 }}
               className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4"
             >
-              {(['pending', 'todo', 'in-progress', 'overdue', 'review', 'rejected', 'done'] as TaskStatus[]).map((status) => (
+              {(['pending', 'in-progress', 'overdue', 'review', 'rejected', 'done'] as TaskStatus[]).map((status) => (
                 <div key={status} className="flex flex-col gap-4">
                   <div className="flex items-center justify-between px-2">
                     <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wider flex items-center gap-2">
                       <div className={cn("w-2 h-2 rounded-full", 
                         status === 'pending' ? "bg-slate-300" :
-                        status === 'todo' ? "bg-blue-500" : 
                         status === 'in-progress' ? "bg-amber-500" : 
                         status === 'overdue' ? "bg-red-500" :
                         status === 'review' ? "bg-sky-500" : 
                         status === 'rejected' ? "bg-red-500" : "bg-emerald-500"
                       )} />
                       {status === 'pending' ? 'CHỜ DUYỆT' :
-                       status === 'todo' ? 'SẴN SÀNG' :
                        status === 'in-progress' ? 'ĐANG LÀM' :
                        status === 'overdue' ? 'QUÁ HẠN' :
                        status === 'review' ? 'CHỜ NGHIỆM THU' :

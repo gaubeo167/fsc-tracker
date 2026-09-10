@@ -42,7 +42,7 @@ function supportTask(assignee: string, actor: string, over: Record<string, unkno
     description: 'Phieu ho tro',
     category: 'Sửa lỗi',
     priority: 'medium',
-    status: 'todo',
+    status: 'in-progress',
     progress: 0,
     date: '2026-09-01',
     assignees: [assignee],
@@ -152,7 +152,7 @@ describe('quyền gán việc khi tiếp nhận phiếu', () => {
     const db = testEnv.authenticatedContext(DEV).firestore();
     await assertFails(
       setDoc(doc(collection(db, `projects/${PROJ}/tasks`)),
-        supportTask(DEV, DEV, { tags: ['WEB_FSB'], status: 'todo' }))
+        supportTask(DEV, DEV, { tags: ['WEB_FSB'], status: 'in-progress' }))
     );
   });
 

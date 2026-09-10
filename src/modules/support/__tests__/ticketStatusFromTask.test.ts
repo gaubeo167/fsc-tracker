@@ -14,6 +14,8 @@ import { ticketStatusFromTask } from '../repository/ticketRepository';
 
 describe('ánh xạ tiến độ công việc sang trạng thái phiếu', () => {
   it('chưa làm gì thì không đổi', () => {
+    expect(ticketStatusFromTask('in-progress', 0, 'ACCEPTED')).toBeNull();
+    // Task cũ còn mang 'todo' cũng phải cho ra đúng kết quả đó.
     expect(ticketStatusFromTask('todo', 0, 'ACCEPTED')).toBeNull();
   });
 
