@@ -67,20 +67,24 @@
   --radius-2xl: 16px;
   --radius-3xl: 16px;
 
-  /* --- Màu hành động: FPT Orange --------------------------------------
-     Đè lên `indigo-*`. Thang 10 bậc của cots dịch xuống một nấc để
-     indigo-600 — sắc mà mọi nút chính trong app đang gọi — rơi đúng vào
-     #F26F21, màu thương hiệu. */
-  --color-indigo-50: #fff4ed;
-  --color-indigo-100: #ffe6d5;
-  --color-indigo-200: #ffc9aa;
-  --color-indigo-300: #ffa274;
-  --color-indigo-400: #ff8a4e;
-  --color-indigo-500: #ff6f3c;  /* icon, nhấn nhẹ */
-  --color-indigo-600: #f26f21;  /* FPT Orange — màu hành động chính */
-  --color-indigo-700: #e35205;  /* hover, trạng thái nhấn */
-  --color-indigo-800: #bc3d08;
-  --color-indigo-900: #95320e;
+  /* --- Màu hành động: XANH DƯƠNG ---------------------------------------
+     ĐIỂM LỆCH LỚN NHẤT so với fsc-cots, và là điểm CỐ Ý.
+     cots lấy FPT Orange #F26F21 làm màu hành động. Tracker giữ xanh dương để
+     hai hệ thống nhìn là biết ngay đang ở đâu — mọi thứ còn lại (nền, bo góc,
+     đổ bóng, mặt chữ, thang chữ) vẫn theo cots từng con số.
+
+     Tiện thể gỡ luôn mâu thuẫn WCAG mà bản cam mang theo: #0066CC với chữ
+     trắng cho 5.57:1, vượt ngưỡng 4.5 — trong khi #F26F21 chỉ được 2.97:1. */
+  --color-indigo-50: #f0f7ff;
+  --color-indigo-100: #dceeff;
+  --color-indigo-200: #b8dcff;
+  --color-indigo-300: #7ec0ff;
+  --color-indigo-400: #2997ff;
+  --color-indigo-500: #0071e3;  /* icon, nhấn nhẹ */
+  --color-indigo-600: #0066cc;  /* màu hành động chính */
+  --color-indigo-700: #0055ab;  /* hover, trạng thái nhấn */
+  --color-indigo-800: #004488;
+  --color-indigo-900: #003366;
 
   /* --- Trung tính -----------------------------------------------------
      Thang xám của cots (chính là gray của Tailwind), với nền trang #F8F9FB. */

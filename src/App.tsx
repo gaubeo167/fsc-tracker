@@ -243,6 +243,19 @@ const CHUA_CO_HAN = 'Chưa có hạn';
 // để test được và để mọi màn hình nói cùng một câu về "quá hạn".
 const isTaskOverdue = (task: Pick<Task, 'date' | 'status'>) => quaHan(task);
 
+/**
+ * Khung nội dung của mọi màn — lấy đúng nhịp của fsc-cots (app-shell.tsx:30).
+ *
+ * 1440px chứ không phải 1280px (max-w-7xl), và đệm 16/24 chứ không phải 32.
+ * Trên màn rộng, bản cũ để lại hai dải trống rất to hai bên còn bảng thì bị
+ * bóp lại — chính là chỗ chủ dự án khoanh đỏ.
+ *
+ * ⚠️ KHÔNG lồng thêm một khung nữa bên trong. Các màn con trước đây tự bọc
+ * `p-8 max-w-7xl mx-auto` của riêng chúng, nằm gọn trong khung này, nên đệm bị
+ * cộng đôi thành 64px mỗi bên và bề ngang thật chỉ còn 1152px.
+ */
+const KHUNG_NOI_DUNG = 'mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6 sm:py-6';
+
 // Contexts
 interface ToastContextType {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -3864,7 +3877,7 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
   if (loading) return <div className="p-8 text-center">Đang tải công việc của bạn...</div>;
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8">
+    <div className="space-y-8">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Công việc của tôi</h1>
@@ -4221,7 +4234,7 @@ const TeamView = () => {
   if (loading) return <div className="p-8 text-center"><Loader2 className="animate-spin mx-auto mb-2" /> Đang tải danh sách...</div>;
 
   return (
-    <div className="p-6 lg:p-8 max-w-7xl mx-auto">
+    <div>
       <ConfirmationModal
         isOpen={confirmModal.isOpen}
         onClose={() => setConfirmModal({ isOpen: false, userId: '' })}
@@ -4709,7 +4722,7 @@ const ReportsView = () => {
   if (loading) return <div className="p-8 text-center">Đang tổng hợp dữ liệu...</div>;
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div>
       <h1 className="text-3xl font-bold text-slate-900 mb-8">Báo cáo hệ thống</h1>
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -6355,11 +6368,11 @@ function AuthConsumer({
 
         <div className="flex-1 pb-20 lg:pb-0">
           {currentProjectId ? (
-            <div className="p-4 lg:p-8 max-w-7xl mx-auto">
+            <div className={KHUNG_NOI_DUNG}>
               <ProjectDetail projectId={currentProjectId} onBack={() => setCurrentProjectId(null)} />
             </div>
           ) : (
-            <div className="p-4 lg:p-8 max-w-7xl mx-auto">
+            <div className={KHUNG_NOI_DUNG}>
               {effectiveNav === 'dashboard' && (
                 <Dashboard onSelectProject={setCurrentProjectId} variant="overview" />
               )}
