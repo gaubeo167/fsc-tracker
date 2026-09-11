@@ -2812,15 +2812,31 @@ const ConfirmationModal = ({
   onConfirm, 
   title, 
   message, 
-  variant = 'danger' 
+  variant = 'danger',
+  confirmPhrase
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
   onConfirm: () => void; 
   title: string; 
   message: string; 
-  variant?: 'danger' | 'warning' | 'info' 
+  variant?: 'danger' | 'warning' | 'info';
+  /**
+   * Bắt gõ đúng chuỗi này thì mới bấm Xác nhận được.
+   *
+   * Dành cho thao tác KHÔNG HOÀN TÁC ĐƯỢC và kéo theo dữ liệu khác — xoá một dự
+   * án là xoá luôn mọi công việc bên trong nó. Một hộp thoại hai nút thì bấm
+   * nhầm chỉ mất nửa giây; gõ tay tên dự án thì không ai nhầm được.
+   *
+   * Chuẩn UX của fsc-cots (README §7), nay là chuẩn chung — xem DESIGN.md §3.
+   */
+  confirmPhrase?: string;
 }) => {
+  const [daGo, setDaGo] = useState('');
+  // Mở lại hộp thoại thì ô gõ phải trống. Không reset thì lần xoá thứ hai đi
+  // thẳng qua cổng bằng chuỗi còn sót của lần trước.
+  useEffect(() => { if (isOpen) setDaGo(''); }, [isOpen]);
+  const khoa = !!confirmPhrase && daGo.trim() !== confirmPhrase;
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={(e) => e.stopPropagation()}>
@@ -2835,10 +2851,27 @@ const ConfirmationModal = ({
           <h3 className="text-xl font-bold text-slate-900">{title}</h3>
         </div>
         <p className="text-slate-500 text-sm leading-relaxed">{message}</p>
+        {confirmPhrase && (
+          <div className="space-y-2">
+            <label htmlFor="o-xac-nhan-xoa" className="block text-sm text-slate-600">
+              Gõ <span className="font-bold text-slate-900">{confirmPhrase}</span> để xác nhận
+            </label>
+            <input
+              id="o-xac-nhan-xoa"
+              value={daGo}
+              onChange={(e) => setDaGo(e.target.value)}
+              autoFocus
+              autoComplete="off"
+              className="w-full px-4 py-2 rounded-lg border border-slate-300 outline-none focus:ring-2 focus:ring-red-500"
+              placeholder={confirmPhrase}
+            />
+          </div>
+        )}
         <div className="flex gap-3 pt-2">
           <Button variant="ghost" className="flex-1" onClick={onClose}>Hủy</Button>
           <Button 
             className={cn("flex-1", variant === 'danger' ? "bg-red-600 hover:bg-red-700" : "bg-indigo-600 hover:bg-indigo-700")} 
+            disabled={khoa}
             onClick={() => {
               onConfirm();
               onClose();
@@ -3312,7 +3345,8 @@ const Dashboard = ({
         onClose={() => setProjectToDelete(null)}
         onConfirm={() => projectToDelete && deleteProject(projectToDelete)}
         title="Xác nhận xóa dự án"
-        message="Bạn có chắc chắn muốn xóa dự án này? Toàn bộ công việc bên trong sẽ bị xóa và không thể khôi phục."
+        message={`Xoá dự án "${projects.find(p => p.id === projectToDelete)?.name ?? ''}" sẽ xoá luôn TOÀN BỘ công việc bên trong, kể cả công việc đang gắn với phiếu hỗ trợ. Không khôi phục được.`}
+        confirmPhrase={projects.find(p => p.id === projectToDelete)?.name}
       />
 
       {isDeleting && (
@@ -5410,7 +5444,8 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
         onClose={() => setShowConfirmDelete(false)}
         onConfirm={handleDeleteProject}
         title="Xác nhận xóa dự án"
-        message="Bạn có chắc chắn muốn xóa dự án này? Toàn bộ công việc bên trong sẽ bị xóa và không thể khôi phục."
+        message={`Xoá dự án "${project?.name ?? ''}" sẽ xoá luôn TOÀN BỘ công việc bên trong, kể cả công việc đang gắn với phiếu hỗ trợ. Không khôi phục được.`}
+        confirmPhrase={project?.name}
       />
 
       {isDeleting && (

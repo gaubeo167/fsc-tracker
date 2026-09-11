@@ -1,145 +1,169 @@
 @import "tailwindcss";
 
+/* Inter, subset tiếng Việt — cùng mặt chữ với fsc-cots.
+   `display=swap`: font về chậm hay hỏng thì trang vẫn hiện ngay bằng font hệ
+   thống rồi đổi sau, không bao giờ treo màn trắng. Đây là lý do lần này dám
+   nạp qua mạng, trong khi bản Apple trước cố ý không nạp gì. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap&subset=vietnamese,latin-ext");
+
 /* ===========================================================================
-   Tầng token Apple — nguồn: DESIGN.md ở gốc repo (getdesign "apple").
-   =========================================================================
+   Tầng token — chuẩn shadcn/ui, lấy từ fsc-cots.
+   ===========================================================================
 
-   Vì sao đổi ở ĐÂY chứ không đi sửa 12.7k dòng TSX:
+   Chuẩn giao diện của hệ thống giờ là chuẩn đang chạy ở fsc-cots: token màu
+   dạng biến, nền xám rất nhạt, thẻ trắng bo 16, FPT Orange làm màu hành động.
+   Đặc tả đầy đủ nằm ở DESIGN.md gốc repo.
 
-   Cả app đang gọi màu qua thang Tailwind mặc định (`slate-*` cho chữ/viền,
-   `indigo-*` cho hành động). Định nghĩa lại chính những biến đó là mọi màn —
-   Dashboard, Công việc, Nhân sự, Báo cáo, Dự án, Hỗ trợ — đổi sang bảng màu
-   Apple cùng lúc, không màn nào bị bỏ sót và không dòng JSX nào phải sửa.
-   Đi sửa tay từng file thì chắc chắn sót, và mỗi lần sót là một mảng giao diện
-   lạc khỏi hệ thống.
+   VÌ SAO ĐỔI Ở ĐÂY CHỨ KHÔNG ĐI SỬA 6.428 DÒNG TSX
+   ------------------------------------------------
+   Cả app gọi màu qua thang Tailwind mặc định: `indigo-*` cho hành động,
+   `slate-*` cho chữ và viền, `red/amber/emerald/sky` cho trạng thái. Định
+   nghĩa lại chính những thang đó là mọi màn đổi cùng lúc — Tổng quan, Công
+   việc, Nhân sự, Báo cáo, Dự án, Hỗ trợ — không màn nào bị bỏ sót và không
+   dòng JSX nào phải sửa. Đi sửa tay từng file thì chắc chắn sót, và mỗi lần
+   sót là một mảng giao diện lạc khỏi hệ thống.
 
-   MỘT ĐIỂM CỐ Ý LỆCH KHỎI DESIGN.md
-   ---------------------------------
-   DESIGN.md cấm "màu nhấn thứ hai": apple.com chỉ có Action Blue. Nhưng
-   apple.com là trang bán hàng — nó không có phiếu quá hạn, không có nút xoá,
-   không có bốn mức ưu tiên phải phân biệt bằng mắt trong một bảng 50 dòng.
-   Bỏ màu trạng thái ở đây nghĩa là bắt người trực đọc chữ từng dòng mới biết
-   phiếu nào cháy. Nên đỏ/cam/lục vẫn còn, nhưng lấy đúng hệ màu hệ thống của
-   Apple (Human Interface Guidelines) chứ không phải thang Tailwind — cùng một
-   nhà, khác cái phòng.
+   BA ĐIỂM CỐ Ý LỆCH KHỎI fsc-cots
+   -------------------------------
+   1. CHƯA CÓ DARK MODE. cots khai bảng màu thứ hai trên `.dark`. Ở đây không
+      bật được chỉ bằng token: JSX rải `bg-white`, `text-slate-900`… dưới dạng
+      class chết, nên chế độ tối phải rà từng màn chứ không phải đổi biến. Bật
+      nửa vời thì ra một giao diện lỗ chỗ trắng đen. Để thành việc riêng.
 
-   Sắc độ Apple thật: #ff3b30 đỏ · #ff9500 cam · #34c759 lục · #0066cc lam.
+   2. `text-xl` và `text-2xl` CÙNG bằng 22px. Thang chữ của cots có 8 bậc
+      (28/22/16/15/14/13/12/11) và không có bậc nào giữa 16 với 22. Thà hai
+      lớp trùng nhau còn hơn nhét một giá trị ngoài thang vào giữa.
+
+   3. Giữ TÍM cho "đề xuất tính năng". cots không có sắc này, nhưng ở đây nó là
+      thứ duy nhất phân biệt đề xuất với mọi nút và mọi link — mà sau khi
+      indigo-* thành cam thì càng phải khác.
    =========================================================================== */
 
 @theme {
-  /* --- Chữ ------------------------------------------------------------
-     SF Pro là font độc quyền của Apple, không cài ngoài được. Trên macOS/iOS,
-     `-apple-system` phân giải thẳng ra SF Pro thật. Máy Windows rơi xuống
-     Inter (DESIGN.md khuyến nghị) rồi Segoe UI. Không nạp font qua mạng: app
-     chạy trong mạng trường, một request font hỏng là cả trang đổi mặt chữ. */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-    Inter, "Segoe UI", Roboto, system-ui, sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
-    Inter, "Segoe UI", Roboto, system-ui, sans-serif;
+  /* --- Chữ ------------------------------------------------------------ */
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    system-ui, sans-serif;
+  --font-display: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    system-ui, sans-serif;
+
+  /* Thang chữ 8 bậc của cots, ánh xạ lên tên lớp Tailwind đang dùng sẵn.
+     Hai bậc 13 và 11 không có tên lớp riêng — dùng qua text-[13px]/[11px]. */
+  --text-3xl: 28px;   /* tiêu đề trang */
+  --text-2xl: 22px;   /* tiêu đề mục */
+  --text-xl: 22px;    /* xem chú thích 2 ở đầu file */
+  --text-lg: 16px;    /* tiêu đề nhỏ, chữ to trong thẻ */
+  --text-base: 15px;  /* thân bài */
+  --text-sm: 14px;    /* mặc định của app — 234 chỗ dùng */
+  --text-xs: 12px;    /* nhãn, chú thích — 178 chỗ dùng */
 
   /* --- Bo góc ---------------------------------------------------------
-     Thang Apple: 5 · 8 · 11 · 18 · pill. Ánh xạ đè lên thang Tailwind để
-     `rounded-lg` / `rounded-xl` đang rải khắp app tự nhận hình học mới.
-     DESIGN.md cấm "trộn ngữ pháp bo góc" — nên xl/2xl gộp về 18px thay vì đẻ
-     thêm hai giá trị trung gian không có trong hệ. */
-  --radius-xs: 5px;
-  --radius-sm: 8px;
-  --radius-md: 11px;
-  --radius-lg: 18px;
-  --radius-xl: 18px;
-  --radius-2xl: 18px;
-  --radius-3xl: 18px;
+     cots: 16 thẻ · 12 control · 8 chip. Ánh xạ theo đúng chỗ app đang dùng:
+     rounded-lg là nút và ô nhập (73 chỗ), rounded-xl/2xl là thẻ (49 chỗ). */
+  --radius-xs: 6px;
+  --radius-sm: 8px;   /* chip, badge */
+  --radius-md: 8px;
+  --radius-lg: 12px;  /* nút, ô nhập, tab */
+  --radius-xl: 16px;  /* thẻ */
+  --radius-2xl: 16px;
+  --radius-3xl: 16px;
 
-  /* --- Màu nhấn: Action Blue ------------------------------------------
-     Đè lên `indigo-*` vì đó là màu hành động app đang dùng sẵn ở mọi nút,
-     mọi link, mọi tab đang chọn. Đổi ở đây là đổi hết. */
-  --color-indigo-50: #f0f7ff;
-  --color-indigo-100: #dceeff;
-  --color-indigo-200: #b8dcff;
-  --color-indigo-300: #7ec0ff;
-  --color-indigo-400: #2997ff;  /* Sky Link Blue — link trên nền tối */
-  --color-indigo-500: #0071e3;  /* Focus Blue — viền focus bàn phím */
-  --color-indigo-600: #0066cc;  /* Action Blue — màu hành động chính */
-  --color-indigo-700: #0055ab;
-  --color-indigo-800: #004488;
-  --color-indigo-900: #003366;
+  /* --- Màu hành động: FPT Orange --------------------------------------
+     Đè lên `indigo-*`. Thang 10 bậc của cots dịch xuống một nấc để
+     indigo-600 — sắc mà mọi nút chính trong app đang gọi — rơi đúng vào
+     #F26F21, màu thương hiệu. */
+  --color-indigo-50: #fff4ed;
+  --color-indigo-100: #ffe6d5;
+  --color-indigo-200: #ffc9aa;
+  --color-indigo-300: #ffa274;
+  --color-indigo-400: #ff8a4e;
+  --color-indigo-500: #ff6f3c;  /* icon, nhấn nhẹ */
+  --color-indigo-600: #f26f21;  /* FPT Orange — màu hành động chính */
+  --color-indigo-700: #e35205;  /* hover, trạng thái nhấn */
+  --color-indigo-800: #bc3d08;
+  --color-indigo-900: #95320e;
 
   /* --- Trung tính -----------------------------------------------------
-     Thang xám thật của Apple. Chữ là #1d1d1f (gần đen, không phải đen tuyệt
-     đối) để trang trông "chụp ảnh" chứ không "in ấn" — DESIGN.md §Colors. */
-  --color-slate-50: #f5f5f7;   /* Parchment — nền trang */
-  --color-slate-100: #f0f0f0;  /* Divider Soft — đường chia mảnh */
-  --color-slate-200: #e0e0e0;  /* Hairline — viền thẻ */
-  --color-slate-300: #d2d2d7;  /* Chip xám, viền ô nhập */
-  --color-slate-400: #86868b;  /* Chữ phụ, icon dẫn */
-  --color-slate-500: #6e6e73;  /* Chữ phụ đậm hơn */
-  --color-slate-600: #4a4a4d;
-  --color-slate-700: #333333;  /* Ink Muted 80 */
-  --color-slate-800: #232325;
-  --color-slate-900: #1d1d1f;  /* Ink — chữ chính, tiêu đề */
+     Thang xám của cots (chính là gray của Tailwind), với nền trang #F8F9FB. */
+  --color-slate-50: #f8f9fb;   /* nền trang */
+  --color-slate-100: #f3f4f6;  /* nền phụ, hàng tiêu đề bảng */
+  --color-slate-200: #e5e7eb;  /* viền thẻ, đường chia */
+  --color-slate-300: #d1d5db;  /* viền ô nhập */
+  --color-slate-400: #9ca3af;  /* icon dẫn, chữ mờ */
+  --color-slate-500: #6b7280;  /* chữ phụ */
+  --color-slate-600: #4b5563;
+  --color-slate-700: #374151;
+  --color-slate-800: #1f2937;
+  --color-slate-900: #141a29;  /* chữ chính, tiêu đề */
 
-  /* --- Trạng thái (điểm lệch có chủ đích, xem đầu file) --------------- */
-  --color-red-50: #fff1f0;
-  --color-red-100: #ffe0dd;
-  --color-red-200: #ffc2bd;
-  --color-red-400: #ff6961;
-  --color-red-500: #ff3b30;    /* Apple system red */
-  --color-red-600: #d70015;    /* đủ tương phản cho chữ trên nền sáng */
-  --color-red-700: #b3000f;
+  /* --- Trạng thái ------------------------------------------------------
+     Bốn sắc semantic của cots: destructive, warning, success, info. */
+  --color-red-50: #fef2f2;
+  --color-red-100: #fee2e2;
+  --color-red-200: #fecaca;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2828;    /* destructive */
+  --color-red-700: #b91c1c;
 
-  --color-amber-50: #fff8ed;
-  --color-amber-100: #ffedd0;
-  --color-amber-200: #ffdba8;
-  --color-amber-500: #ff9500;  /* Apple system orange */
-  --color-amber-600: #c26a00;
-  --color-amber-700: #955000;
-  --color-amber-800: #7a4100;
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-amber-500: #f59f0a;  /* warning — dùng làm NỀN chip, không làm chữ */
+  /* 600 là bậc app dùng để viết CHỮ cảnh báo trên nền sáng (20 chỗ). Giá trị
+     gốc #d97706 chỉ đạt 3.19:1, dưới ngưỡng 4.5 của WCAG AA. Đẩy xuống một nấc
+     thành 5.02:1. Không mất gì: bậc này không được dùng làm nền ở đâu cả. */
+  --color-amber-600: #b45309;
+  --color-amber-700: #92400e;
+  --color-amber-800: #92400e;
 
-  --color-emerald-50: #eefaf1;
-  --color-emerald-100: #d7f3de;
-  --color-emerald-500: #34c759; /* Apple system green */
-  --color-emerald-600: #248a3d;
-  --color-emerald-700: #1c6b30;
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-100: #d1fae5;
+  --color-emerald-500: #2eae74;
+  /* Cùng lý do như amber-600: chữ "hoàn thành" màu lục đạt 3.83:1 là chưa đủ.
+     #1b7049 cho 6.07:1, và ba chỗ dùng làm nền chữ trắng cũng sáng sủa hơn. */
+  --color-emerald-600: #1b7049;  /* success */
+  --color-emerald-700: #14563a;
 
-  --color-sky-50: #eef8ff;
-  --color-sky-100: #d5edff;
-  --color-sky-500: #32ade6;    /* Apple system teal-blue */
-  --color-sky-600: #0f7fb5;
-  --color-sky-700: #0b6491;
+  --color-sky-50: #eff6ff;
+  --color-sky-100: #dbeafe;
+  --color-sky-500: #3182ed;    /* info */
+  --color-sky-600: #2563eb;
+  --color-sky-700: #1d4ed8;
 
-  /* Tím hệ thống Apple — màu của "đề xuất tính năng".
-     Phải là một sắc RIÊNG, không mượn indigo: sau khi indigo-* thành Action
-     Blue thì icon đề xuất trùng đúng màu của mọi nút và mọi link trong app,
-     tức là mất hẳn khả năng nhận diện. */
-  --color-violet-50: #faf4fe;
-  --color-violet-100: #f0e0fb;
-  --color-violet-200: #e2c4f6;
-  --color-violet-500: #af52de; /* Apple system purple */
-  --color-violet-600: #8e3cb8;
-  --color-violet-700: #722f93;
-  --color-rose-500: #ff2d55;   /* Apple system pink */
+  /* Tím — xem chú thích 3 ở đầu file. Lấy chart-4 của cots. */
+  --color-violet-50: #f5f2fd;
+  --color-violet-100: #e9e0fa;
+  --color-violet-200: #d5c4f5;
+  --color-violet-500: #8652e0;
+  --color-violet-600: #6d3cc4;
+  --color-violet-700: #5730a0;
+  --color-rose-500: #e11d48;
 
-  /* --- Token gọi tên trực tiếp ----------------------------------------
-     Dùng khi cần nói rõ ý nghĩa thay vì mượn tên thang màu. */
+  /* --- Đổ bóng ---------------------------------------------------------
+     Năm bậc rất nhẹ của cots, tính trên #101828 chứ không phải đen tuyền —
+     bóng xám xanh trông sạch hơn bóng đen trên nền #F8F9FB. */
+  --shadow-xs: 0 1px 2px 0 rgb(16 24 40 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(16 24 40 / 0.06), 0 1px 2px -1px rgb(16 24 40 / 0.04);
+  --shadow-md: 0 4px 12px -2px rgb(16 24 40 / 0.06), 0 2px 6px -2px rgb(16 24 40 / 0.04);
+  --shadow-lg: 0 12px 28px -6px rgb(16 24 40 / 0.10), 0 4px 10px -4px rgb(16 24 40 / 0.05);
+  --shadow-xl: 0 16px 40px -12px rgb(16 24 40 / 0.16);
+  --shadow-2xl: 0 16px 40px -12px rgb(16 24 40 / 0.16);
+
+  /* --- Token gọi tên trực tiếp ----------------------------------------- */
   --color-canvas: #ffffff;
-  --color-parchment: #f5f5f7;
-  --color-pearl: #fafafc;
-  --color-hairline: #e0e0e0;
-  --color-ink: #1d1d1f;
-  --color-tile: #272729;
+  --color-parchment: #f8f9fb;
+  --color-hairline: #e5e7eb;
+  --color-ink: #141a29;
 }
 
-/* Bóng đổ DUY NHẤT của hệ thống. DESIGN.md §Elevation: bóng dành riêng cho ảnh
-   sản phẩm, không đặt lên thẻ / nút / chữ. Ở app này nó dùng cho lớp nổi thật
-   sự (modal, popover) — thứ tương đương "vật thể nằm trên mặt phẳng". */
+/* Lớp nổi thật sự: modal, popover. Tương đương bậc `pop` của cots. */
 @utility shadow-product {
-  box-shadow: rgba(0, 0, 0, 0.22) 3px 5px 30px 0;
+  box-shadow: 0 16px 40px -12px rgb(16 24 40 / 0.16);
 }
 
-/* Thanh dính kiểu Apple: parchment 80% + backdrop blur. DESIGN.md nói rõ đây
-   là cách duy nhất tạo cảm giác "nổi trên nội dung" ngoài việc đổi màu nền. */
+/* Thanh dính: nền trang 80% + làm mờ hậu cảnh. */
 @utility surface-frosted {
-  background-color: color-mix(in srgb, #f5f5f7 80%, transparent);
+  background-color: color-mix(in srgb, #f8f9fb 82%, transparent);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
 }
@@ -155,30 +179,34 @@
     background-color: var(--color-parchment);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    /* "Apple tight": siết tracking ở mọi cỡ chữ từ 17px trở lên. DESIGN.md ghi
-       -0.374px ở 17px ≈ -0.022em, nên -0.01em ở gốc rồi siết thêm ở tiêu đề. */
-    letter-spacing: -0.01em;
+    /* KHÔNG siết tracking. Đó là nhịp của SF Pro; Inter đã được vẽ để đọc
+       đúng ở tracking mặc định, siết vào là chữ dính nhau ở cỡ nhỏ. */
   }
 
-  /* Tiêu đề: SF Pro Display, weight 600 (KHÔNG phải 700 — thang cân của Apple
-     là 300/400/600/700 và 700 chỉ dành cho tagline). Siết tracking mạnh hơn
-     thân bài, đúng nhịp headline đặc trưng. */
   h1, h2, h3, h4 {
     font-family: var(--font-display);
-    letter-spacing: -0.022em;
   }
 
-  /* Vòng focus bàn phím: 2px Focus Blue, đúng đặc tả button-primary-focus.
-     Khai ở base để MỌI điều khiển trong app có cùng một tín hiệu focus. */
+  /* Vòng focus bàn phím: 2px, đúng chuẩn WCAG AA mà cots đang áp. Khai ở base
+     để MỌI điều khiển trong app có cùng một tín hiệu focus. */
   :focus-visible {
-    outline: 2px solid var(--color-indigo-500);
+    outline: 2px solid var(--color-indigo-600);
     outline-offset: 2px;
   }
 
-  /* Ô nhập kế thừa font của trang. Không khai thì Chrome dùng font mặc định
-     của trình duyệt và mọi <select>/<input> lạc khỏi mặt chữ chung. */
   input, select, textarea, button {
     font-family: inherit;
-    letter-spacing: inherit;
+  }
+
+  /* Người bật "giảm chuyển động" trong hệ điều hành thì không nhận animation
+     nào. Nằm trong chuẩn accessibility của cots, và ở app này có thật: thẻ
+     việc dùng animate-pulse cho nhãn QUÁ HẠN, modal có transition scale. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
