@@ -1129,15 +1129,27 @@ const TaskTable: React.FC<{
                 <span className={cn("text-xs tabular-nums", getDeadlineStyle(task.date, task.status))}>{task.date || CHUA_CO_HAN}</span>
               </td>
               <td className="px-4 py-3">
-                <Badge variant={
-                  task.status === 'done' ? 'success' :
-                  task.status === 'review' ? 'sky' :
-                  task.status === 'rejected' ? 'danger' :
-                  task.status === 'in-progress' ? 'info' :
-                  task.status === 'pending' ? 'warning' : 'neutral'
-                }>
-                  {nhanTrangThai(task.status)}
-                </Badge>
+                {/* Bảng này là danh sách chính người ta quét mắt hằng ngày, và nó
+                    là nơi DUY NHẤT không có hai nhãn kia: một việc trễ hạn nằm
+                    đây trông y hệt một việc xong đúng hạn. Thẻ thống kê đếm đúng
+                    nhưng không chỉ ra được việc nào. */}
+                <div className="flex flex-wrap items-center gap-1">
+                  <Badge variant={
+                    task.status === 'done' ? 'success' :
+                    task.status === 'review' ? 'sky' :
+                    task.status === 'rejected' ? 'danger' :
+                    task.status === 'in-progress' ? 'info' :
+                    task.status === 'pending' ? 'warning' : 'neutral'
+                  }>
+                    {nhanTrangThai(task.status)}
+                  </Badge>
+                  {isTaskOverdue(task) && (
+                    <Badge variant="danger" className="text-[8px] py-0 px-1">QUÁ HẠN</Badge>
+                  )}
+                  {task.status === 'done' && task.doneLate && (
+                    <Badge variant="warning" className="text-[8px] py-0 px-1">XONG MUỘN</Badge>
+                  )}
+                </div>
               </td>
             </tr>
           );
