@@ -3337,6 +3337,9 @@ const Dashboard = ({
                             {isTaskOverdue(task) && (
                               <Badge variant="danger" className="animate-pulse text-[8px] py-0 px-1">QUÁ HẠN</Badge>
                             )}
+                            {task.status === 'done' && task.doneLate && (
+                              <Badge variant="warning" className="text-[8px] py-0 px-1">XONG MUỘN</Badge>
+                            )}
                           </div>
                           <div className="text-[10px] text-slate-400">{projects.find(p => p.id === task.projectId)?.name}</div>
                         </td>
@@ -3376,10 +3379,7 @@ const Dashboard = ({
                             task.status === 'in-progress' ? 'info' : 
                             task.status === 'pending' ? 'warning' : 'neutral'
                           }>
-                            {task.status === 'pending' ? 'CHỜ DUYỆT' :
-                                             task.status === 'in-progress' ? 'ĐANG LÀM' :
-                             task.status === 'review' ? 'CHỜ NGHIỆM THU' :
-                             task.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
+                            {nhanTrangThai(task.status)}
                           </Badge>
                         </td>
                       </tr>
