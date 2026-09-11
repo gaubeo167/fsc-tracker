@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chuanHoaTrangThai, trangThaiTheoTienDo } from '../taskStatus';
+import { chuanHoaTrangThai, coTheKeoTienDo, nhanTrangThai, trangThaiTheoTienDo } from '../taskStatus';
 
 // Trạng thái 'todo' ("Sẵn sàng") đã bị bỏ khỏi vòng đời công việc. Hai điều
 // phải đúng sau khi bỏ, và đây là chỗ chốt chúng:
@@ -45,5 +45,48 @@ describe('trangThaiTheoTienDo', () => {
 
   it('vượt quá 100 vẫn là chờ nghiệm thu', () => {
     expect(trangThaiTheoTienDo(120)).toBe('review');
+  });
+});
+
+describe('nhanTrangThai', () => {
+  it('⭐ KHÔNG có nhãn "QUÁ HẠN" — quá hạn không phải trạng thái', () => {
+    // Trước đây quá hạn ĐÈ lên nhãn thật, nên việc đang chờ chính mình nghiệm
+    // thu lại hiện ra "QUÁ HẠN" và người ta tưởng hệ thống đã khoá nó lại.
+    const moiNhan = ['pending', 'in-progress', 'review', 'rejected', 'done']
+      .map(nhanTrangThai);
+    expect(moiNhan).not.toContain('QUÁ HẠN');
+  });
+
+  it('việc cũ mang "todo" vẫn đọc ra ĐANG LÀM', () => {
+    expect(nhanTrangThai('todo')).toBe('ĐANG LÀM');
+  });
+
+  it.each([
+    ['pending', 'CHỜ DUYỆT'],
+    ['in-progress', 'ĐANG LÀM'],
+    ['review', 'CHỜ NGHIỆM THU'],
+    ['rejected', 'BỊ TỪ CHỐI'],
+    ['done', 'HOÀN THÀNH'],
+  ])('%s -> %s', (status, nhan) => {
+    expect(nhanTrangThai(status)).toBe(nhan);
+  });
+});
+
+describe('coTheKeoTienDo', () => {
+  it('⭐ việc chờ nghiệm thu vẫn kéo tiến độ được', () => {
+    // Việc đã 100% mà phát sinh thêm thì người làm phải tự nói được là mình
+    // đang làm tiếp, thay vì ngồi chờ người nghiệm thu từ chối hộ.
+    expect(coTheKeoTienDo('review')).toBe(true);
+  });
+
+  it('đang làm và bị từ chối thì đương nhiên được', () => {
+    expect(coTheKeoTienDo('in-progress')).toBe(true);
+    expect(coTheKeoTienDo('rejected')).toBe(true);
+    expect(coTheKeoTienDo('todo')).toBe(true);
+  });
+
+  it('chưa duyệt thì chưa bắt đầu, đã nghiệm thu thì phải mở lại', () => {
+    expect(coTheKeoTienDo('pending')).toBe(false);
+    expect(coTheKeoTienDo('done')).toBe(false);
   });
 });

@@ -36,3 +36,40 @@ export function chuanHoaTrangThai(status: unknown): TaskStatus {
 export function trangThaiTheoTienDo(progress: number): TaskStatus {
   return progress >= 100 ? 'review' : 'in-progress';
 }
+
+/**
+ * Nhãn tiếng Việt của trạng thái.
+ *
+ * Gom về đây vì chuỗi ternary này từng được chép tay ở năm chỗ (thẻ việc, dòng
+ * danh sách, bảng, modal chi tiết, đầu cột Kanban). Năm bản chép tay là năm cơ
+ * hội để một hôm nào đó chúng nói khác nhau về cùng một việc.
+ *
+ * KHÔNG có nhãn 'QUÁ HẠN' ở đây, và đó là chủ ý: quá hạn không phải trạng thái
+ * mà là nhãn dán thêm, hiện song song. Trước đây nó ĐÈ LÊN nhãn thật, nên một
+ * việc đang chờ nghiệm thu mà lỡ hạn thì hiện ra "QUÁ HẠN" — người ta mất dấu
+ * việc đang chờ chính mình bấm nghiệm thu, và tưởng việc quá hạn thì hệ thống
+ * khoá lại không cho làm gì nữa.
+ */
+export function nhanTrangThai(status: TaskStatus | string): string {
+  switch (chuanHoaTrangThai(status)) {
+    case 'pending': return 'CHỜ DUYỆT';
+    case 'in-progress': return 'ĐANG LÀM';
+    case 'review': return 'CHỜ NGHIỆM THU';
+    case 'rejected': return 'BỊ TỪ CHỐI';
+    case 'done': return 'HOÀN THÀNH';
+    default: return String(status || '').toUpperCase();
+  }
+}
+
+/**
+ * Người thực hiện còn kéo được thanh tiến độ ở trạng thái này không.
+ *
+ * 'review' CÓ, và đây là thay đổi: việc đã 100% chờ nghiệm thu mà phát sinh
+ * thêm thì phải kéo tiến độ xuống được để nói rằng mình đang làm tiếp, thay vì
+ * chờ người nghiệm thu từ chối hộ. 'pending' thì chưa duyệt nên chưa bắt đầu,
+ * 'done' đã nghiệm thu thì phải mở lại chứ không sửa lén tiến độ.
+ */
+export function coTheKeoTienDo(status: TaskStatus | string): boolean {
+  const s = chuanHoaTrangThai(status);
+  return s === 'in-progress' || s === 'rejected' || s === 'review';
+}

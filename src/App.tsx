@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, createContext, useContext, Component } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext, Component } from 'react';
 import { 
   getRedirectResult,
   onAuthStateChanged, 
@@ -22,6 +22,7 @@ import {
   writeBatch,
   updateDoc, 
   deleteDoc, 
+  arrayUnion,
   Timestamp,
   orderBy
 } from 'firebase/firestore';
@@ -37,7 +38,10 @@ import {
   Bell, 
   Settings, 
   ChevronRight, 
-  Clock, 
+  Clock,
+  CalendarX,
+  History,
+  ArrowRight, 
   MessageSquare, 
   Star,
   MoreVertical,
@@ -126,6 +130,7 @@ function normalizeTask(raw: any): Task {
     cc: raw?.cc ?? [],
     tags: raw?.tags ?? [],
     progress: raw?.progress ?? 0,
+    deadlineHistory: raw?.deadlineHistory ?? [],
     // Quy đổi ở ĐÂY vì đây là cửa duy nhất dữ liệu đi từ Firestore vào React.
     // Lý do đầy đủ nằm trong services/taskStatus.ts.
     status: chuanHoaTrangThai(raw?.status),
@@ -136,8 +141,11 @@ import {
   TaskImageError, newDraftId, removeTaskImage, uploadTaskImage,
 } from './services/taskImages';
 import { OnboardingGate } from './modules/support/components/OnboardingGate';
-import { chuanHoaTrangThai, trangThaiTheoTienDo } from './services/taskStatus';
+import { chuanHoaTrangThai, coTheKeoTienDo, nhanTrangThai, trangThaiTheoTienDo } from './services/taskStatus';
 import { laQuanLyDuAn } from './services/taskPermissions';
+import {
+  caDoiHan, datCoHoanThanh, hanTheoThoiLuong, quaHan, soNgayDaKeoDai, taoMocDoiHan,
+} from './services/deadline';
 import { laUngDungManHinhChinh, nhanDienWebview } from './services/inAppBrowser';
 import { SupportAdminView } from './modules/support/components/admin/SupportAdminView';
 import { SupportView } from './modules/support/components/SupportView';
@@ -231,14 +239,9 @@ const getDeadlineStyle = (dateStr: string, status: TaskStatus) => {
  */
 const CHUA_CO_HAN = 'Chưa có hạn';
 
-const isTaskOverdue = (task: Task) => {
-  if (task.status === 'done') return false;
-  if (!task.date) return false;
-  const deadline = new Date(task.date);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return deadline < today;
-};
+// Giữ tên cũ vì nó được gọi ở hơn hai mươi chỗ; phép tính nằm ở services/deadline.ts
+// để test được và để mọi màn hình nói cùng một câu về "quá hạn".
+const isTaskOverdue = (task: Pick<Task, 'date' | 'status'>) => quaHan(task);
 
 // Contexts
 interface ToastContextType {
@@ -566,14 +569,18 @@ const CommentPromptModal = ({
   onCancel, 
   placeholder = "Nhập ghi chú...",
   confirmText = "Xác nhận",
-  variant = "primary"
+  variant = "primary",
+  batBuoc = false
 }: { 
   title: string; 
   onConfirm: (comment: string) => void; 
   onCancel: () => void; 
   placeholder?: string;
   confirmText?: string;
-  variant?: "primary" | "danger" | "success"
+  variant?: "primary" | "danger" | "success";
+  /** Không cho bấm Xác nhận khi ô trống. Dùng cho lý do đổi hạn: một dòng lý do
+   *  rỗng trong nhật ký còn tệ hơn không có nhật ký, vì nó trông như đã trả lời. */
+  batBuoc?: boolean;
 }) => {
   const [comment, setComment] = useState('');
   return (
@@ -597,6 +604,7 @@ const CommentPromptModal = ({
           <Button 
             variant={variant === 'danger' ? 'danger' : 'primary'} 
             className={cn("flex-1", variant === 'success' && "bg-emerald-600 hover:bg-emerald-700")}
+            disabled={batBuoc && !comment.trim()}
             onClick={() => onConfirm(comment)}
           >
             {confirmText}
@@ -737,19 +745,16 @@ const TaskCard: React.FC<{
           
 
 
+          {/* Trạng thái THẬT. Quá hạn là nhãn dán thêm bên cạnh, không đè lên
+              đây — xem services/taskStatus.ts::nhanTrangThai. */}
           <Badge variant={
-            isTaskOverdue(task) ? 'danger' :
             task.status === 'done' ? 'success' :
             task.status === 'rejected' ? 'danger' :
             task.status === 'in-progress' ? 'info' : 
             task.status === 'review' ? 'sky' :
             task.status === 'pending' ? 'warning' : 'neutral'
           }>
-            {isTaskOverdue(task) ? 'QUÁ HẠN' :
-             task.status === 'pending' ? 'CHỜ DUYỆT' :
-             task.status === 'in-progress' ? 'ĐANG LÀM' :
-             task.status === 'review' ? 'CHỜ NGHIỆM THU' :
-             task.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
+            {nhanTrangThai(task.status)}
           </Badge>
         </div>
         <span className={cn("text-[10px] font-mono whitespace-nowrap", getDeadlineStyle(task.date, task.status))}>
@@ -771,10 +776,15 @@ const TaskCard: React.FC<{
           {isTaskOverdue(task) && (
             <Badge variant="danger" className="animate-pulse text-[8px] py-0 px-1">QUÁ HẠN</Badge>
           )}
+          {/* Việc đã xong thì "quá hạn" tắt, nên dấu trễ hạn phải do chính lượt
+              nghiệm thu đóng lại — nếu không nó biến mất cùng lúc với vấn đề. */}
+          {task.status === 'done' && task.doneLate && (
+            <Badge variant="warning" className="text-[8px] py-0 px-1">XONG MUỘN</Badge>
+          )}
         </div>
       </div>
       
-      {(task.subtasks.length > 0 || !(isAssignee && (task.status === 'in-progress' || task.status === 'rejected'))) && (
+      {(task.subtasks.length > 0 || !(isAssignee && coTheKeoTienDo(task.status))) && (
         <div className="space-y-1">
           <div className="flex justify-between text-[10px] text-slate-500">
             <span>{task.subtasks.length > 0 ? 'Checklist' : 'Tiến độ'}</span>
@@ -842,7 +852,9 @@ const TaskCard: React.FC<{
         </div>
       </div>
 
-      {isAssignee && (task.status === 'in-progress' || task.status === 'rejected') && task.subtasks.length === 0 && (
+      {/* Quá hạn KHÔNG khoá thanh kéo này. Việc trễ vẫn phải cập nhật được —
+          chặn lại thì người ta bỏ mặc nó ngoài hệ thống và số liệu sai theo. */}
+      {isAssignee && coTheKeoTienDo(task.status) && task.subtasks.length === 0 && (
         <div className="pt-2">
           <input 
             type="range" 
@@ -932,19 +944,16 @@ const TaskListItem: React.FC<{
           }>
             {task.priority.toUpperCase()}
           </Badge>
+          {/* Trạng thái THẬT. Quá hạn là nhãn dán thêm bên cạnh, không đè lên
+              đây — xem services/taskStatus.ts::nhanTrangThai. */}
           <Badge variant={
-            isTaskOverdue(task) ? 'danger' :
             task.status === 'done' ? 'success' :
             task.status === 'rejected' ? 'danger' :
             task.status === 'in-progress' ? 'info' : 
             task.status === 'review' ? 'sky' :
             task.status === 'pending' ? 'warning' : 'neutral'
           }>
-            {isTaskOverdue(task) ? 'QUÁ HẠN' :
-             task.status === 'pending' ? 'CHỜ DUYỆT' :
-             task.status === 'in-progress' ? 'ĐANG LÀM' :
-             task.status === 'review' ? 'CHỜ NGHIỆM THU' :
-             task.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
+            {nhanTrangThai(task.status)}
           </Badge>
         </div>
         <div className="flex flex-wrap gap-1 mb-2">
@@ -956,6 +965,11 @@ const TaskListItem: React.FC<{
           )}
           {isTaskOverdue(task) && (
             <Badge variant="danger" className="animate-pulse text-[8px] py-0 px-1">QUÁ HẠN</Badge>
+          )}
+          {/* Việc đã xong thì "quá hạn" tắt, nên dấu trễ hạn phải do chính lượt
+              nghiệm thu đóng lại — nếu không nó biến mất cùng lúc với vấn đề. */}
+          {task.status === 'done' && task.doneLate && (
+            <Badge variant="warning" className="text-[8px] py-0 px-1">XONG MUỘN</Badge>
           )}
         </div>
         <div className="flex items-center gap-4 text-[10px]">
@@ -1122,10 +1136,7 @@ const TaskTable: React.FC<{
                   task.status === 'in-progress' ? 'info' :
                   task.status === 'pending' ? 'warning' : 'neutral'
                 }>
-                  {task.status === 'pending' ? 'CHỜ DUYỆT' :
-                         task.status === 'in-progress' ? 'ĐANG LÀM' :
-                   task.status === 'review' ? 'CHỜ NGHIỆM THU' :
-                   task.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
+                  {nhanTrangThai(task.status)}
                 </Badge>
               </td>
             </tr>
@@ -1312,6 +1323,8 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
   // Cán bộ nhà trường chỉ vào hệ thống để gửi yêu cầu hỗ trợ, không nhận việc.
   const campusStaff = useCampusStaffUids(profile);
   const [isEditingMetadata, setIsEditingMetadata] = useState(false);
+  // Đang hỏi lý do đổi hạn. handleSave dừng lại ở đây rồi chạy tiếp khi có lý do.
+  const [hoiLyDoDoiHan, setHoiLyDoDoiHan] = useState(false);
   const [projectName, setProjectName] = useState<string>('');
   const [editedTask, setEditedTask] = useState({ 
     ...task,
@@ -1337,7 +1350,10 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     estimatedDuration: task.estimatedDuration || 0,
     estimatedDeadline: task.estimatedDeadline || '',
     subtasks: task.subtasks || [],
-    comments: task.comments || []
+    comments: task.comments || [],
+    // Thiếu dòng này thì khối "Lịch sử đổi hạn" không bao giờ hiện: state khởi
+    // tạo bằng danh sách field GHI TAY, không phải {...task}.
+    deadlineHistory: task.deadlineHistory || [],
   });
   const [loading, setLoading] = useState(false);
   const [newComment, setNewComment] = useState('');
@@ -1351,18 +1367,11 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
   const [showActionCommentModal, setShowActionCommentModal] = useState<{ status: TaskStatus; title: string; variant: "primary" | "danger" | "success" } | null>(null);
   const [editingSubtask, setEditingSubtask] = useState<{ id: string; text: string; deadline: string } | null>(null);
 
-  useEffect(() => {
-    if (editedTask.startDate && editedTask.estimatedDuration > 0) {
-      const start = new Date(editedTask.startDate);
-      const end = addDays(start, editedTask.estimatedDuration);
-      const formattedEnd = format(end, 'yyyy-MM-dd');
-      setEditedTask(prev => ({ 
-        ...prev, 
-        estimatedDeadline: formattedEnd,
-        date: formattedEnd
-      }));
-    }
-  }, [editedTask.startDate, editedTask.estimatedDuration]);
+  // Hạn được tính lại NGAY TRONG onChange của hai ô "ngày bắt đầu" và "số ngày
+  // dự kiến" — xem hanTheoThoiLuong(). Đây từng là một useEffect, và effect thì
+  // chạy cả lúc mở modal: chỉ xem một việc thôi là hạn đã bị tính đè lên hạn
+  // người ta chốt tay. Chặn "lượt chạy đầu" bằng useRef cũng không cứu được vì
+  // StrictMode ở bản dev chạy effect hai lần.
 
   // Quản lý của CHÍNH dự án này, không phải "ai mang vai trò manager".
   // Lý do đầy đủ nằm trong services/taskPermissions.ts.
@@ -1411,7 +1420,11 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     }
   };
 
-  const handleSave = async () => {
+  /**
+   * @param lyDoDoiHan Lý do kéo dài/rút ngắn hạn. Chỉ cần khi hạn thật sự đổi;
+   *   handleSave tự dừng lại hỏi rồi gọi lại chính nó với lý do đã nhập.
+   */
+  const handleSave = async (lyDoDoiHan?: string) => {
     // Validate that task deadline is not earlier than any subtask deadline
     // Chỉ so khi task lớn có hạn: task chưa chốt hạn (date rỗng) thì mọi hạn của
     // công việc nhỏ đều "lớn hơn" chuỗi rỗng, và người dùng không lưu nổi gì.
@@ -1420,6 +1433,17 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
       : undefined;
     if (invalidSubtask) {
       showToast(`Hạn của task lớn không được sớm hơn hạn của công việc nhỏ: "${invalidSubtask.text}" (${format(new Date(invalidSubtask.deadline), 'dd/MM/yyyy')})`, 'error');
+      return;
+    }
+
+    // Hạn đổi thì BẮT BUỘC có lý do, không có ngoại lệ nào. Việc bị chen ngang
+    // rồi trượt hạn là chuyện bình thường; cái không bình thường là ba tháng sau
+    // không ai nói được vì sao nó trượt.
+    const hanCu = task.date || '';
+    const hanMoi = editedTask.date || '';
+    const hanDaDoi = caDoiHan(hanCu, hanMoi);
+    if (hanDaDoi && !lyDoDoiHan?.trim()) {
+      setHoiLyDoDoiHan(true);
       return;
     }
 
@@ -1457,11 +1481,40 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
             if (cleanComment[key] === undefined) delete cleanComment[key];
           });
           return cleanComment;
-        })
+        }),
+        // CHỈ gửi khi hạn thật sự đổi. Gửi kèm mọi lượt lưu thì với document cũ
+        // chưa có field này, đó là một key MỚI trong diff — và rules chặn lượt
+        // lưu của người thực hiện, vốn chỉ được đụng vào tiến độ và checklist.
+        // arrayUnion chứ KHÔNG phải ghi đè cả mảng: xem taoMocDoiHan().
+        ...(hanDaDoi ? {
+          deadlineHistory: arrayUnion(taoMocDoiHan({
+            hanCu, hanMoi, lyDo: lyDoDoiHan!, userId: profile?.uid || '',
+          })),
+        } : {}),
+        // Ô trạng thái trong màn sửa cũng đóng được việc. Thiếu dòng này thì
+        // việc đóng bằng đường đó không mang dấu trễ hạn, và bảng "xong muộn"
+        // đếm thiếu vĩnh viễn — dấu vết không tính lại được sau khi việc đã xong.
+        ...(editedTask.status === 'done' && task.status !== 'done'
+          ? datCoHoanThanh(editedTask) : {}),
       };
 
       if (!task.projectId) throw new Error('Missing projectId');
-      await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), taskData);
+
+      // Người thực hiện chỉ được ghi năm field này (firestore.rules), nên gửi
+      // đúng năm field.
+      //
+      // Gửi cả hai mươi field thì mọi field DOCUMENT CŨ KHÔNG CÓ đều tính là
+      // key mới trong diff — task cũ thiếu startDate/estimatedDuration là
+      // chuyện thường — và cả lượt lưu bị từ chối, dù người ta chỉ kéo tiến độ.
+      // Đúng triệu chứng "bấm cập nhật mà báo không có quyền".
+      const KEY_NGUOI_THUC_HIEN = ['progress', 'subtasks', 'comments', 'attachedImages', 'status'];
+      const duLieuGhi = isManager
+        ? taskData
+        : Object.fromEntries(
+            Object.entries(taskData).filter(([k]) => KEY_NGUOI_THUC_HIEN.includes(k))
+          );
+
+      await updateDoc(doc(db, `projects/${task.projectId}/tasks`, task.id), duLieuGhi);
 
       // Phiếu hỗ trợ phải biết công việc vừa đổi gì.
       //
@@ -1484,6 +1537,24 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
           read: false,
           time: Timestamp.now()
         });
+      }
+
+      // Đổi hạn thì người thực hiện phải biết NGAY, kèm lý do. Hạn đổi âm thầm
+      // là cách nhanh nhất để một việc trượt tiếp lần nữa.
+      if (hanDaDoi) {
+        const canBiet = [...new Set([
+          ...(editedTask.assignees || []), ...(editedTask.reviewers || []),
+          ...(editedTask.cc || []), ...projectManagers,
+        ])].filter(id => id !== profile?.uid);
+        for (const targetId of canBiet) {
+          await addDoc(collection(db, 'notifications'), {
+            targetUserId: targetId,
+            message: `Hạn công việc "${task.title}" đổi từ ${hanCu || CHUA_CO_HAN.toLowerCase()} sang ${hanMoi || CHUA_CO_HAN.toLowerCase()}. Lý do: ${lyDoDoiHan?.trim()}`,
+            taskId: task.id,
+            read: false,
+            time: Timestamp.now(),
+          });
+        }
       }
 
       // If status or progress changed, notify all involved users
@@ -1741,7 +1812,10 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         description: editedTask.description || '',
         category: editedTask.category || '',
         priority: editedTask.priority || 'medium',
-        date: editedTask.date || '',
+        // CỐ Ý không gửi 'date'. Nghiệm thu hay từ chối không bao giờ đổi hạn,
+        // mà gửi kèm thì nó mang theo giá trị đang nằm trong form: người quản lý
+        // sửa ô hạn rồi bỏ qua hộp hỏi lý do, bấm Nghiệm thu, và lượt ghi bị
+        // rules chặn nguyên khối vì đổi hạn mà không có mốc nào.
         assignees: editedTask.assignees || [],
         reviewers: editedTask.reviewers || [],
         cc: editedTask.cc || [],
@@ -1749,6 +1823,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         attachedImages: editedTask.attachedImages || [],
         progress: newStatus === 'done' ? 100 : (newStatus === 'rejected' && task.status === 'review' ? 90 : editedTask.progress),
         status: finalStatus,
+        ...(finalStatus === 'done' ? datCoHoanThanh(editedTask) : {}),
         subtasks: (editedTask.subtasks || []).map(s => ({
           ...s,
           comments: (s.comments || []).map(c => {
@@ -1833,18 +1908,17 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
               {editedTask.priority.toUpperCase()}
             </Badge>
             <Badge variant={
-              isTaskOverdue(editedTask as Task) ? 'danger' :
               editedTask.status === 'done' ? 'success' :
               editedTask.status === 'rejected' ? 'danger' :
-              editedTask.status === 'in-progress' ? 'warning' : 
-              'neutral'
+              editedTask.status === 'review' ? 'sky' :
+              editedTask.status === 'in-progress' ? 'info' :
+              editedTask.status === 'pending' ? 'warning' : 'neutral'
             }>
-              {isTaskOverdue(editedTask as Task) ? 'QUÁ HẠN' :
-               editedTask.status === 'pending' ? 'CHỜ DUYỆT' :
-               editedTask.status === 'in-progress' ? 'ĐANG LÀM' :
-               editedTask.status === 'review' ? 'CHỜ NGHIỆM THU' :
-               editedTask.status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
+              {nhanTrangThai(editedTask.status)}
             </Badge>
+            {isTaskOverdue(editedTask as Task) && (
+              <Badge variant="danger" className="animate-pulse">QUÁ HẠN</Badge>
+            )}
             <div className="flex items-center gap-2 text-slate-500">
               <Briefcase size={16} />
               <span className="text-sm font-medium">{projectName || 'Đang tải...'}</span>
@@ -2060,7 +2134,11 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                     <input 
                       type="date" 
                       value={editedTask.startDate}
-                      onChange={(e) => setEditedTask({ ...editedTask, startDate: e.target.value })}
+                      onChange={(e) => setEditedTask(prev => ({
+                        ...prev,
+                        startDate: e.target.value,
+                        ...(hanTheoThoiLuong(e.target.value, prev.estimatedDuration) ?? {}),
+                      }))}
                       className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                   ) : (
@@ -2076,7 +2154,11 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                     <input 
                       type="number" 
                       value={editedTask.estimatedDuration}
-                      onChange={(e) => setEditedTask({ ...editedTask, estimatedDuration: Number(e.target.value) })}
+                      onChange={(e) => setEditedTask(prev => ({
+                        ...prev,
+                        estimatedDuration: Number(e.target.value),
+                        ...(hanTheoThoiLuong(prev.startDate, Number(e.target.value)) ?? {}),
+                      }))}
                       className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
                       min="0"
                     />
@@ -2117,6 +2199,55 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                   )}
                 </div>
               </section>
+
+              {/* ------------------------------------------------------------
+                  Lịch sử đổi hạn.
+                  Chỉ hiện khi CÓ, để việc chạy đúng hạn không phải mang thêm
+                  một khối trống. Mỗi dòng là một bản ghi không sửa được: hạn cũ,
+                  hạn mới, lý do, ai đổi, lúc nào.
+                 ------------------------------------------------------------ */}
+              {(editedTask.deadlineHistory || []).length > 0 && (
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                      <History size={18} className="text-amber-500" /> Lịch sử đổi hạn
+                      <span className="text-xs font-normal text-slate-400">
+                        ({(editedTask.deadlineHistory || []).length} lần)
+                      </span>
+                    </h3>
+                    {soNgayDaKeoDai(editedTask) !== 0 && (
+                      <Badge variant={soNgayDaKeoDai(editedTask) > 0 ? 'warning' : 'info'}>
+                        {soNgayDaKeoDai(editedTask) > 0
+                          ? `KÉO DÀI ${soNgayDaKeoDai(editedTask)} NGÀY`
+                          : `RÚT NGẮN ${-soNgayDaKeoDai(editedTask)} NGÀY`}
+                      </Badge>
+                    )}
+                  </div>
+                  <ol className="space-y-2">
+                    {(editedTask.deadlineHistory || []).map((moc, i) => {
+                      const nguoi = users.find(u => u.uid === moc.userId);
+                      return (
+                        <li key={moc.id || i} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                          <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-700">
+                            <span className="text-slate-400 line-through">
+                              {moc.hanCu ? format(new Date(moc.hanCu), 'dd/MM/yyyy') : CHUA_CO_HAN}
+                            </span>
+                            <ArrowRight size={14} className="text-slate-400 shrink-0" />
+                            <span className="text-indigo-600">
+                              {moc.hanMoi ? format(new Date(moc.hanMoi), 'dd/MM/yyyy') : CHUA_CO_HAN}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-slate-600 whitespace-pre-wrap break-words">{moc.lyDo}</p>
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {nguoi?.displayName || moc.userId}
+                            {moc.time?.toDate ? ` · ${format(moc.time.toDate(), 'dd/MM/yyyy HH:mm')}` : ''}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </section>
+              )}
 
               {/* Description Section */}
               <section className="space-y-3">
@@ -2397,7 +2528,11 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
                           <option value="in-progress">Đang làm</option>
                           <option value="review">Chờ nghiệm thu</option>
                           <option value="rejected">Bị từ chối</option>
-                          <option value="overdue">Quá hạn</option>
+                          {/* KHÔNG có "Quá hạn" ở đây: quá hạn suy ra từ hạn chót,
+                              không phải một trạng thái lưu xuống. Lưu được nó thì
+                              việc rơi vào một trạng thái không màn nào xử lý —
+                              nhãn hiện ra "OVERDUE" và người thực hiện mất luôn
+                              thanh kéo tiến độ. */}
                           <option value="done">Hoàn thành</option>
                         </select>
                       </div>
@@ -2543,7 +2678,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={onClose}>Thoát</Button>
                 {profile?.role !== 'director' && (
-                  <Button variant="primary" onClick={handleSave} disabled={loading}>Cập nhật tiến độ</Button>
+                  <Button variant="primary" onClick={() => handleSave()} disabled={loading}>Cập nhật tiến độ</Button>
                 )}
               </div>
             )}
@@ -2560,6 +2695,21 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         )}
       </motion.div>
     </div>
+
+    {hoiLyDoDoiHan && (
+      <CommentPromptModal
+        title="Lý do thay đổi hạn hoàn thành"
+        variant="primary"
+        confirmText="Lưu hạn mới"
+        batBuoc
+        placeholder={`Hạn đổi từ ${task.date ? format(new Date(task.date), 'dd/MM/yyyy') : CHUA_CO_HAN} sang ${editedTask.date ? format(new Date(editedTask.date), 'dd/MM/yyyy') : CHUA_CO_HAN}. Vì sao?`}
+        onConfirm={(lyDo) => {
+          setHoiLyDoDoiHan(false);
+          void handleSave(lyDo);
+        }}
+        onCancel={() => setHoiLyDoDoiHan(false)}
+      />
+    )}
 
     {showActionCommentModal && (
       <CommentPromptModal 
@@ -2661,7 +2811,7 @@ const Dashboard = ({
   const [loading, setLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
-  const [filterStatus, setFilterStatus] = useState<TaskStatus | 'overdue' | 'all'>('all');
+  const [filterStatus, setFilterStatus] = useState<TaskStatus | 'overdue' | 'done-late' | 'all'>('all');
 
   useEffect(() => {
     const q = collection(db, 'projects');
@@ -2759,11 +2909,17 @@ const Dashboard = ({
     rejected: dashboardTasks.filter(t => t.status === 'rejected').length,
     completed: dashboardTasks.filter(t => t.status === 'done').length,
     overdue: dashboardTasks.filter(t => isTaskOverdue(t)).length,
+    // Đếm theo dấu doneLate đóng lúc nghiệm thu, KHÔNG suy lại từ hạn: việc đã
+    // xong thì isTaskOverdue luôn trả false, nên suy lại là ra 0 mãi mãi.
+    // Phải kèm status: dấu doneLate ở lại trên document sau khi việc được MỞ
+    // LẠI (nghiệm thu rồi từ chối), nên đếm trần là đếm cả việc đang làm dở.
+    xongMuon: dashboardTasks.filter(t => t.status === 'done' && t.doneLate).length,
   };
 
   const filteredDashboardTasks = dashboardTasks.filter(t => {
     if (filterStatus === 'all') return true;
     if (filterStatus === 'overdue') return isTaskOverdue(t);
+    if (filterStatus === 'done-late') return t.status === 'done' && !!t.doneLate;
     return t.status === filterStatus;
   });
 
@@ -2866,7 +3022,7 @@ const Dashboard = ({
       {/* Dãy thẻ số liệu — CHỈ ở Tổng quan. Đây là thứ trả lời "hệ thống đang
           thế nào", không phải thứ giúp quản lý một dự án cụ thể. */}
       {laTongQuan && (
-      <div className={cn("grid gap-4", isUser ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-6" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-5")}>
+      <div className={cn("grid gap-4", isUser ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-7" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-6")}>
         {isUser ? (
           // User Dashboard Stats
           [
@@ -2876,6 +3032,7 @@ const Dashboard = ({
             { label: 'Nghiệm thu', value: stats.review, icon: Search, color: 'bg-blue-50 text-blue-600', status: 'review' },
             { label: 'Hoàn thành', value: stats.completed, icon: CheckCircle2, color: 'bg-emerald-50 text-emerald-600', status: 'done' },
             { label: 'Quá hạn', value: stats.overdue, icon: AlertTriangle, color: 'bg-red-50 text-red-600', status: 'overdue' },
+            { label: 'Xong muộn', value: stats.xongMuon, icon: CalendarX, color: 'bg-orange-50 text-orange-600', status: 'done-late' },
           ].map((stat, i) => (
             <Card 
               key={i} 
@@ -2899,6 +3056,7 @@ const Dashboard = ({
             { label: 'Tổng Task', value: stats.totalTasks, icon: List, color: 'bg-slate-50 text-slate-600' },
             { label: 'Đang làm', value: stats.inProgress, icon: Play, color: 'bg-amber-50 text-amber-600' },
             { label: 'Quá hạn', value: stats.overdue, icon: AlertTriangle, color: 'bg-red-50 text-red-600' },
+            { label: 'Xong muộn', value: stats.xongMuon, icon: CalendarX, color: 'bg-orange-50 text-orange-600' },
             { label: 'Hoàn thành', value: stats.completed, icon: CheckCircle2, color: 'bg-emerald-50 text-emerald-600' },
           ].map((stat, i) => (
             <Card key={i} className="p-4 flex flex-col items-center justify-center text-center space-y-2 border-none shadow-sm bg-white">
@@ -2928,7 +3086,7 @@ const Dashboard = ({
                 Công việc của tôi 
                 {filterStatus !== 'all' && (
                   <span className="text-sm font-normal text-slate-500 ml-2">
-                    (Lọc: {filterStatus === 'overdue' ? 'Quá hạn' : filterStatus.toUpperCase()})
+                    (Lọc: {filterStatus === 'overdue' ? 'Quá hạn' : filterStatus === 'done-late' ? 'Xong muộn' : nhanTrangThai(filterStatus)})
                   </span>
                 )}
               </h2>
@@ -3439,7 +3597,7 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
   const [loading, setLoading] = useState(true);
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'priority' | 'deadline'>('newest');
-  const [filterStatus, setFilterStatus] = useState<TaskStatus | 'overdue' | 'all'>('all');
+  const [filterStatus, setFilterStatus] = useState<TaskStatus | 'overdue' | 'done-late' | 'all'>('all');
 
   // Mở thẳng một công việc khi người dùng bấm "Mở công việc" từ phiếu hỗ trợ.
   // Chờ danh sách về rồi mới mở: lúc bấm thì màn này còn chưa dựng xong.
@@ -3505,11 +3663,13 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
     review: tasks.filter(t => t.status === 'review').length,
     done: tasks.filter(t => t.status === 'done').length,
     overdue: tasks.filter(t => isTaskOverdue(t)).length,
+    xongMuon: tasks.filter(t => t.status === 'done' && t.doneLate).length,
   };
 
   const filteredTasks = tasks.filter(t => {
     if (filterStatus === 'all') return true;
     if (filterStatus === 'overdue') return isTaskOverdue(t);
+    if (filterStatus === 'done-late') return t.status === 'done' && !!t.doneLate;
     return t.status === filterStatus;
   });
 
@@ -3534,6 +3694,9 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
         updates.progress = 90;
       } else if (newStatus === 'done') {
         updates.progress = 100;
+        // Đóng dấu ngày nghiệm thu và việc này có muộn không. Không ghi lúc này
+        // thì không bao giờ ghi được nữa: xong rồi là "quá hạn" tắt vĩnh viễn.
+        Object.assign(updates, datCoHoanThanh(task));
       } else if (newStatus === 'in-progress' && task.status === 'pending') {
         updates.progress = 0;
       }
@@ -3616,7 +3779,7 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
       </div>
 
       {/* Stats Dashboard */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
         {[
           { label: 'Tổng Task', value: stats.total, icon: List, color: 'bg-slate-50 text-slate-600', status: 'all' },
           { label: 'Đang làm', value: stats.inProgress, icon: Play, color: 'bg-amber-50 text-amber-600', status: 'in-progress' },
@@ -3624,6 +3787,7 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
           { label: 'Nghiệm thu', value: stats.review, icon: Search, color: 'bg-blue-50 text-blue-600', status: 'review' },
           { label: 'Hoàn thành', value: stats.done, icon: CheckCircle2, color: 'bg-emerald-50 text-emerald-600', status: 'done' },
           { label: 'Quá hạn', value: stats.overdue, icon: AlertTriangle, color: 'bg-red-50 text-red-600', status: 'overdue' },
+          { label: 'Xong muộn', value: stats.xongMuon, icon: CalendarX, color: 'bg-orange-50 text-orange-600', status: 'done-late' },
         ].map((stat, i) => (
           <Card 
             key={i} 
@@ -3649,7 +3813,7 @@ const MyTasksView = ({ openTaskId, onOpened }: { openTaskId?: string | null; onO
             Danh sách công việc
             {filterStatus !== 'all' && (
               <span className="text-sm font-normal text-slate-500 ml-2">
-                (Lọc: {filterStatus === 'overdue' ? 'Quá hạn' : filterStatus.toUpperCase()})
+                (Lọc: {filterStatus === 'overdue' ? 'Quá hạn' : filterStatus === 'done-late' ? 'Xong muộn' : nhanTrangThai(filterStatus)})
               </span>
             )}
           </h2>
@@ -4983,6 +5147,8 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
       }
     } else if (newStatus === 'done') {
       updates.progress = 100;
+      // Xem chú thích ở updateTaskStatus của màn "Công việc của tôi".
+      Object.assign(updates, datCoHoanThanh(task));
     } else if (newStatus === 'in-progress' && task.status === 'pending') {
       // Approved from pending
       updates.progress = 0;
@@ -5257,11 +5423,7 @@ const ProjectDetail = ({ projectId, onBack }: { projectId: string; onBack: () =>
                         status === 'review' ? "bg-sky-500" : 
                         status === 'rejected' ? "bg-red-500" : "bg-emerald-500"
                       )} />
-                      {status === 'pending' ? 'CHỜ DUYỆT' :
-                       status === 'in-progress' ? 'ĐANG LÀM' :
-                       status === 'overdue' ? 'QUÁ HẠN' :
-                       status === 'review' ? 'CHỜ NGHIỆM THU' :
-                       status === 'rejected' ? 'BỊ TỪ CHỐI' : 'HOÀN THÀNH'}
+                      {status === 'overdue' ? 'QUÁ HẠN' : nhanTrangThai(status)}
                     </h3>
                   </div>
                   <div className="flex-1 space-y-3 min-h-[500px] bg-slate-100/50 p-2 rounded-xl">

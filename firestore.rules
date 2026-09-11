@@ -230,7 +230,74 @@ service cloud.firestore {
           return request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']);
         }
 
-        allow update: if isAdmin() || isDirector() || isManager(projectId) || (
+        function soMocHan(data) {
+          return data.get('deadlineHistory', []).size();
+        }
+
+        /**
+         * Nhật ký đổi hạn: chỉ được DÀI RA, và hạn không đổi lén được.
+         *
+         * Hai mệnh đề, đứng trên MỌI nhánh quyền bên dưới — kể cả admin:
+         *
+         *   1. Số mốc không bao giờ giảm. Một nhật ký sửa được thì không phải
+         *      nhật ký; ba tháng sau không ai dám tin con số trong đó nữa.
+         *   2. Đổi 'date' thì phải kèm một mốc mới. Không có vế này, nhật ký chỉ
+         *      là thiện chí của giao diện: mở devtools ghi thẳng 'date' là hạn
+         *      trượt thêm một tháng mà không để lại dấu vết nào.
+         *
+         * Lúc TẠO task thì 'date' đặt lần đầu, không phải một lần đổi hạn, nên
+         * ràng buộc này cố ý chỉ nằm ở update.
+         */
+        function lichSuHanToanVen() {
+          let cu = resource.data.get('deadlineHistory', []);
+          let moi = request.resource.data.get('deadlineHistory', []);
+          let doiHan = request.resource.data.diff(resource.data).affectedKeys().hasAny(['date']);
+          return moi.size() >= cu.size()
+            // Phần đầu của danh sách mới phải GIỐNG HỆT danh sách cũ.
+            //
+            // So số lượng thôi là không đủ, và đây là chỗ bản đầu tiên sai: ghi
+            // đè hai mốc cũ bằng hai mốc bịa thì số lượng không đổi nên lọt, và
+            // lý do kéo dài ba tháng trước sửa lại thành gì cũng được. Lát cắt
+            // này mới là "chỉ được thêm vào".
+            //
+            // Vế cu.size() == 0 KHÔNG thừa: lát cắt rỗng moi[0:0] không so bằng
+            // được với danh sách rỗng trong rules, và mọi lượt ghi lên task chưa
+            // từng đổi hạn — tức gần như mọi lượt ghi — đều bị từ chối. Đã dính
+            // đúng một lần: sáu test xanh thành đỏ cùng lúc.
+            && (cu.size() == 0 || moi[0:cu.size()] == cu)
+            && (!doiHan || (moi.size() == cu.size() + 1 && mocMoiHopLe(moi[cu.size()])));
+        }
+
+        /**
+         * Mốc vừa thêm phải nói đúng sự thật về lượt ghi đang diễn ra.
+         *
+         * Không có phần này thì ràng buộc "đổi hạn phải kèm mốc" thoả mãn được
+         * bằng một object rỗng: hạn vẫn trượt một tháng, nhật ký vẫn dài thêm
+         * một dòng, và dòng đó không nói gì cả.
+         */
+        function mocMoiHopLe(m) {
+          return m.get('lyDo', '').size() > 0
+            && m.get('userId', '') == request.auth.uid
+            && m.get('hanCu', '') == resource.data.get('date', '')
+            && m.get('hanMoi', '') == request.resource.data.get('date', '');
+        }
+
+        /**
+         * Dấu trễ hạn phải khớp với chính hai con số nằm cùng document.
+         *
+         * Người nghiệm thu không tự khai "không muộn" cho một việc đóng sau hạn
+         * được. Đây là phép kiểm nội tại, không phải bằng chứng tuyệt đối về
+         * thời điểm — nhưng nó chặn đúng cái dối trá rẻ tiền nhất.
+         */
+        function dauTreHanHopLe() {
+          let d = request.resource.data;
+          return !d.diff(resource.data).affectedKeys().hasAny(['doneAt', 'doneLate'])
+            || (d.status == 'done'
+                && d.get('doneLate', false) ==
+                   (d.get('date', '') != '' && d.get('doneAt', '') > d.get('date', '')));
+        }
+
+        allow update: if lichSuHanToanVen() && dauTreHanHopLe() && (isAdmin() || isDirector() || isManager(projectId) || (
           isTaskAssignee(resource.data) && 
           // Allow updating these fields
           (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['progress', 'subtasks', 'comments', 'attachedImages', 'status'])) &&
@@ -239,9 +306,13 @@ service cloud.firestore {
         ) || (
           isTaskReviewer(resource.data) && 
           // Reviewer can approve/reject and add comments
-          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'comments', 'progress'])) &&
+          // 'doneAt'/'doneLate' là dấu vết trễ hạn, đóng vào đúng lúc nghiệm thu.
+          // Không cho ghi ở đây thì chính người nghiệm thu lại là người duy nhất
+          // không nghiệm thu nổi.
+          (request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'comments', 'progress', 'doneAt', 'doneLate'])) &&
           (!doiTrangThai() || request.resource.data.status in ['todo', 'done', 'rejected', 'in-progress'])
-        );
+        ));
 
         allow delete: if isAdmin() || isManager(projectId);
       }

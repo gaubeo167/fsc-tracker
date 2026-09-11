@@ -50,6 +50,26 @@ export interface TaskComment {
   time: Timestamp;
 }
 
+/**
+ * Một lần đổi hạn hoàn thành của công việc.
+ *
+ * Hạn không phải một ô ngày mà là một CHUỖI các mốc: việc bị chen ngang, bị
+ * kéo dài, và ba tháng sau không ai nhớ hạn ban đầu là bao giờ hay vì sao nó
+ * trượt. Mỗi lần đổi ghi lại một bản ghi, không bao giờ sửa lại bản ghi cũ —
+ * firestore.rules chặn mọi lượt ghi làm danh sách này ngắn đi.
+ *
+ * `hanCu` rỗng nghĩa là trước đó việc chưa có hạn (phiếu hỗ trợ tiếp nhận ở
+ * chế độ "chưa xác định hạn" sinh ra task như vậy).
+ */
+export interface DeadlineChange {
+  id: string;
+  hanCu: string;   // yyyy-MM-dd, '' nếu trước đó chưa có hạn
+  hanMoi: string;  // yyyy-MM-dd
+  lyDo: string;
+  userId: string;
+  time: Timestamp;
+}
+
 export interface Task {
   id: string;
   projectId: string;
@@ -71,6 +91,20 @@ export interface Task {
   subtasks: SubTask[];
   comments: TaskComment[];
   createdAt: Timestamp;
+
+  /** Lịch sử đổi hạn, cũ nhất trước. Chỉ được thêm vào, không được sửa hay xoá. */
+  deadlineHistory?: DeadlineChange[];
+
+  /**
+   * Ngày nghiệm thu (yyyy-MM-dd) và việc đó có trễ hạn không.
+   *
+   * Phải LƯU chứ không suy ra được: isTaskOverdue() so hạn với hôm nay và luôn
+   * trả false cho việc đã xong, nên ngay khi nghiệm thu xong thì dấu vết trễ
+   * hạn biến mất vĩnh viễn. Không có hai field này thì không thống kê nổi câu
+   * hỏi đầu tiên ai cũng hỏi: trong số việc đã xong, bao nhiêu việc xong muộn.
+   */
+  doneAt?: string;
+  doneLate?: boolean;
 }
 
 export interface Review {
