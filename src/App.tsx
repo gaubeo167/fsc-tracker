@@ -156,7 +156,7 @@ import { filterAssignableUsers } from './modules/support/services/assignableUser
 import { useNavBadges } from './modules/support/hooks/useNavBadges';
 import { finishInvitation, readUsableInvitation } from './modules/support/repository/invitationRepository';
 
-import { syncTicketFromTask } from './modules/support/repository/ticketRepository';
+import { goLienKetKhiXoaTask, syncTicketFromTask } from './modules/support/repository/ticketRepository';
 import { MemberScopeCell } from './modules/support/components/admin/MemberScopeCell';
 import { watchRoleAssignments } from './modules/support/repository/userAdminRepository';
 import { watchCampuses } from './modules/support/repository/campusRepository';
@@ -1337,6 +1337,7 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
   const [isEditingMetadata, setIsEditingMetadata] = useState(false);
   // Đang hỏi lý do đổi hạn. handleSave dừng lại ở đây rồi chạy tiếp khi có lý do.
   const [hoiLyDoDoiHan, setHoiLyDoDoiHan] = useState(false);
+  const [xacNhanXoa, setXacNhanXoa] = useState(false);
   const [projectName, setProjectName] = useState<string>('');
   const [editedTask, setEditedTask] = useState({ 
     ...task,
@@ -1785,6 +1786,43 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
     }
   };
 
+  /**
+   * Xoá hẳn một công việc. Dành cho bản tạo trùng.
+   *
+   * firestore.rules đã cho admin và quản lý dự án xoá từ trước; thiếu là thiếu
+   * đúng cái nút này, nên cách duy nhất để bỏ một task tạo nhầm là xoá cả dự án.
+   *
+   * Phiếu hỗ trợ trỏ vào task này phải được gỡ ra trong cùng thao tác, nếu không
+   * nó mắc kẹt ở ACCEPTED mà không còn công việc nào — xem goLienKetKhiXoaTask.
+   */
+  const xoaTask = async () => {
+    if (!task.projectId || !profile) return;
+    setLoading(true);
+    try {
+      await deleteDoc(doc(db, `projects/${task.projectId}/tasks`, task.id));
+
+      const ticketId = (task as any).supportTicketId as string | undefined;
+      let veHangDoi = false;
+      if (ticketId) {
+        const kq = await goLienKetKhiXoaTask({ ticketId, taskId: task.id, actorUid: profile.uid });
+        veHangDoi = kq.daDuaVeHangDoi;
+      }
+
+      showToast(
+        veHangDoi
+          ? 'Đã xoá công việc. Phiếu hỗ trợ quay về hàng đợi chờ tiếp nhận lại.'
+          : 'Đã xoá công việc.'
+      );
+      setXacNhanXoa(false);
+      onClose();
+    } catch (error) {
+      setXacNhanXoa(false);
+      handleFirestoreError(error, OperationType.DELETE, `projects/${task.projectId}/tasks/${task.id}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleApprovalAction = async (newStatus: TaskStatus, actionComment?: string) => {
     if (!profile) return;
     setLoading(true);
@@ -1971,6 +2009,20 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
               >
                 {isEditingMetadata ? <Save size={16} /> : <Edit3 size={16} />}
                 {isEditingMetadata ? 'Lưu thay đổi' : 'Sửa Task'}
+              </Button>
+            )}
+            {/* Cùng điều kiện với firestore.rules: admin hoặc quản lý của CHÍNH
+                dự án này. Kèm tên thao tác chứ không để icon trần — một nút chỉ
+                có hình thùng rác cạnh nút Sửa là thứ người ta bấm nhầm. */}
+            {(isAdmin || isManager) && !isEditingMetadata && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setXacNhanXoa(true)}
+                disabled={loading}
+                className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50"
+              >
+                <Trash2 size={16} /> Xoá việc
               </Button>
             )}
             <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full text-slate-400 transition-colors">
@@ -2707,6 +2759,21 @@ const TaskEditModal = ({ task, users, projectManagers = [], onClose }: { task: T
         )}
       </motion.div>
     </div>
+
+    <ConfirmationModal
+      isOpen={xacNhanXoa}
+      onClose={() => setXacNhanXoa(false)}
+      onConfirm={() => void xoaTask()}
+      title="Xoá công việc này?"
+      message={
+        ((task as any).supportTicketId
+          ? `Công việc này sinh ra từ phiếu hỗ trợ ${(task as any).supportTicketNo || ''}. `
+            + 'Nếu phiếu đó đang gắn với chính công việc này, phiếu sẽ quay về hàng đợi chờ '
+            + 'tiếp nhận lại và trường sẽ nhận được thông báo. '
+          : '')
+        + 'Toàn bộ tiến độ, checklist và trao đổi trong công việc sẽ mất, không khôi phục được.'
+      }
+    />
 
     {hoiLyDoDoiHan && (
       <CommentPromptModal

@@ -1627,3 +1627,89 @@ export async function requestMoreInfo(input: {
     return { ok: false, error: classifyError(error) };
   }
 }
+
+/**
+ * Task bị xoá — gỡ phiếu ra khỏi nó.
+ *
+ * Vì sao phải có: module Công việc giờ cho admin và quản lý dự án xoá một task
+ * (thường là bản tạo trùng). Nếu task đó là task mà một phiếu hỗ trợ đang trỏ
+ * vào, xoá xong phiếu rơi vào trạng thái không lối ra: status vẫn ACCEPTED nên
+ * KHÔNG còn nằm trong hàng đợi tiếp nhận, mà linkedTaskId lại trỏ vào một
+ * document không tồn tại nên màn chi tiết không hiện tiến độ gì. Trường nhìn
+ * thấy "đã tiếp nhận" và chờ mãi một công việc không còn tồn tại, còn đội xử lý
+ * không thấy phiếu ở đâu cả.
+ *
+ * Vì vậy xoá task = HOÀN TÁC lượt tiếp nhận: phiếu quay về hàng đợi để có người
+ * nhận lại. Có ghi một dòng vào luồng trao đổi, vì trường đã nhận thông báo
+ * "đã tiếp nhận" — im lặng lúc gỡ ra là để họ tin vào một điều không còn đúng.
+ *
+ * Phiếu trỏ vào task KHÁC thì không đụng tới: đó đúng là trường hợp xoá bản
+ * tạo trùng, phiếu vẫn gắn với task thật và không có gì phải sửa.
+ */
+export async function goLienKetKhiXoaTask(input: {
+  ticketId: string;
+  taskId: string;
+  actorUid: string;
+}): Promise<{ daDuaVeHangDoi: boolean; error: RepoError | null }> {
+  const now = Date.now();
+  // Đọc danh tính TRƯỚC transaction: callback chạy lại mỗi lần transaction thử
+  // lại, nên lượt đọc đặt bên trong sẽ lặp theo.
+  const nguoi = await fetchMessageIdentity(input.actorUid);
+
+  try {
+    return await runTransaction(db, async (tx) => {
+      const ref = doc(db, TICKET_COL.tickets, input.ticketId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return { daDuaVeHangDoi: false, error: null };
+
+      const d = snap.data() as Record<string, unknown>;
+      // Phiếu đã gắn sang task khác (hoặc chưa gắn gì): không phải việc của ta.
+      if (String(d.linkedTaskId ?? '') !== input.taskId) {
+        return { daDuaVeHangDoi: false, error: null };
+      }
+
+      const ticketNo = String(d.ticketNo ?? '');
+      tx.update(ref, {
+        status: 'TRIAGE',
+        linkedTaskId: null,
+        linkedProjectId: null,
+        assigneeUserId: null,
+        triagedBy: null,
+        triagedAt: null,
+        updatedAt: now,
+      });
+      tx.update(doc(db, TICKET_COL.ticketIndex, input.ticketId), { status: 'TRIAGE' });
+
+      // CỐ Ý không đụng lastMessageAt/By/Side: ba field đó nghĩa là "có người
+      // đang chờ được trả lời", mà dòng ghi việc thì không phải câu hỏi.
+      tx.set(doc(collection(db, TICKET_COL.tickets, input.ticketId, TICKET_COL.messages)), {
+        authorUid: input.actorUid,
+        authorName: nguoi.name,
+        authorSide: nguoi.side,
+        body: 'Công việc gắn với phiếu này đã bị xoá. Phiếu quay về hàng đợi chờ tiếp nhận lại.',
+        attachments: [],
+        isSystem: true,
+        createdAt: now,
+      });
+
+      for (const uid of new Set(
+        [String(d.reporterUserId ?? ''), String(d.campusContactUserId ?? '')].filter(Boolean)
+      )) {
+        tx.set(doc(collection(db, 'notifications')), {
+          targetUserId: uid,
+          message:
+            `Yêu cầu ${ticketNo} quay lại hàng đợi chờ tiếp nhận: `
+            + 'công việc đang xử lý đã bị xoá.',
+          ticketId: input.ticketId,
+          ticketNo,
+          read: false,
+          time: Timestamp.now(),
+        });
+      }
+
+      return { daDuaVeHangDoi: true, error: null };
+    });
+  } catch (error) {
+    return { daDuaVeHangDoi: false, error: classifyError(error) };
+  }
+}

@@ -270,8 +270,15 @@ async function main() {
     const tk = (t as any).task;
     if (tk) {
       // Đúng hình dạng mà acceptTicket() sinh ra, kể cả thẻ 'ho-tro' và ô CC.
+      //
+      // ⚠️ supportTicketId/supportTicketNo là ĐƯỜNG TRA NGƯỢC từ công việc về
+      // phiếu, và thiếu chúng thì mọi thứ đi theo chiều đó lặng lẽ không chạy
+      // trong môi trường thử: đồng bộ tiến độ về phiếu, và cảnh báo "xoá việc
+      // này thì phiếu quay về hàng đợi". Đã mất một lượt QA vì tưởng code hỏng
+      // trong khi hỏng là dữ liệu mẫu.
       await db.collection('projects').doc(tk.projectId).collection('tasks').doc(`task-${id}`).set({
         id: `task-${id}`, projectId: tk.projectId,
+        supportTicketId: id, supportTicketNo: t.no,
         title: `[${t.no}] ${t.title}`,
         description: `Phiếu hỗ trợ ${t.no} — ${t.campus}\n\n${t.desc}`,
         category: 'Sửa lỗi',
